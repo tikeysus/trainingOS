@@ -37,5 +37,7 @@ applied migration.
   either inline payload bytes or a local storage path.
 - Source references and sync audit rows support idempotent import and resume
   behavior without embedding vendor types in canonical tables.
+- Per-source checkpoints advance transactionally with successful handler
+  writes. Retry attempts and safe error details remain queryable by sync run.
 - Computed records persist method name, method version, evidence links, and
   caveats so historical values remain explainable.
