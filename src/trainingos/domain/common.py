@@ -22,6 +22,7 @@ class Unit(StrEnum):
     RATIO = "ratio"
     COUNT = "count"
     WATT = "W"
+    MILLILITRE_PER_KILOGRAM_PER_MINUTE = "mL/kg/min"
 
 
 class ProvenanceKind(StrEnum):
@@ -30,6 +31,12 @@ class ProvenanceKind(StrEnum):
     USER_ENTERED = "user_entered"
     COMPUTED = "computed"
     MODEL_INTERPRETED = "model_interpreted"
+
+
+class MetricStatus(StrEnum):
+    MEASURED = "measured"
+    UNAVAILABLE = "unavailable"
+    UNSUPPORTED = "unsupported"
 
 
 def require_text(value: str, field_name: str) -> None:
@@ -74,6 +81,7 @@ class SourceReference:
     external_id: str
     synced_at: datetime
     raw_reference: str | None = None
+    parser: MethodVersion | None = None
 
     def __post_init__(self) -> None:
         require_text(self.source, "source")
@@ -134,12 +142,19 @@ class RecordMetadata:
 @dataclass(frozen=True, slots=True)
 class MetricValue:
     key: str
-    measurement: Measurement
+    measurement: Measurement | None
     quality: float | None = None
     attributes: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    status: MetricStatus = MetricStatus.MEASURED
 
     def __post_init__(self) -> None:
         require_text(self.key, "metric key")
+        if self.status is MetricStatus.MEASURED and self.measurement is None:
+            raise ValueError("measured metric requires a measurement")
+        if self.status is not MetricStatus.MEASURED and self.measurement is not None:
+            raise ValueError("unmeasured metric must not include a measurement")
+        if self.status is not MetricStatus.MEASURED and self.quality is not None:
+            raise ValueError("unmeasured metric must not include quality")
         if self.quality is not None and not 0.0 <= self.quality <= 1.0:
             raise ValueError("quality must be between 0 and 1")
         for key, value in self.attributes:
