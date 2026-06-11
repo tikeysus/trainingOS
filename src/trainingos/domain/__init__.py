@@ -4,6 +4,7 @@ from .activity import Activity, ActivitySample, ActivityType, Lap
 from .common import (
     Measurement,
     MethodVersion,
+    MetricStatus,
     MetricValue,
     Provenance,
     ProvenanceKind,
@@ -25,6 +26,7 @@ __all__ = [
     "Lap",
     "Measurement",
     "MethodVersion",
+    "MetricStatus",
     "MetricEvidence",
     "MetricValue",
     "NoteKind",

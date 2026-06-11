@@ -8,6 +8,7 @@ from trainingos.domain import (
     ActivityType,
     Measurement,
     MethodVersion,
+    MetricStatus,
     MetricEvidence,
     MetricValue,
     Provenance,
@@ -99,6 +100,27 @@ class DomainModelTests(unittest.TestCase):
                 metric=evidence.metric,
                 window_start=evidence.window_start,
                 window_end=evidence.window_end,
+            )
+
+    def test_metric_status_distinguishes_absence_from_measured_zero(self) -> None:
+        measured_zero = MetricValue(
+            "stress",
+            Measurement(0, Unit.COUNT),
+        )
+        unavailable = MetricValue(
+            "stress",
+            None,
+            status=MetricStatus.UNAVAILABLE,
+        )
+
+        self.assertEqual(0, measured_zero.measurement.value)
+        self.assertIsNone(unavailable.measurement)
+
+        with self.assertRaisesRegex(ValueError, "unmeasured metric"):
+            MetricValue(
+                "stress",
+                Measurement(0, Unit.COUNT),
+                status=MetricStatus.UNSUPPORTED,
             )
 
 

@@ -5,7 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from .common import MetricValue, ProvenanceKind, RecordMetadata, as_utc, require_text
+from .common import (
+    MetricStatus,
+    MetricValue,
+    ProvenanceKind,
+    RecordMetadata,
+    as_utc,
+    require_text,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +32,8 @@ class MetricEvidence:
             raise ValueError("metric evidence requires provenance")
         if self.metadata.provenance.kind is not ProvenanceKind.COMPUTED:
             raise ValueError("metric evidence must use computed provenance")
+        if self.metric.status is not MetricStatus.MEASURED:
+            raise ValueError("metric evidence requires a measured value")
         if self.summary is not None:
             require_text(self.summary, "summary")
         object.__setattr__(self, "window_start", window_start)
