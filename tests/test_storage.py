@@ -12,6 +12,7 @@ from trainingos.storage import (
     connect_database,
     discover_migrations,
 )
+from trainingos.storage.migrations import _sql_statements
 
 
 class StorageTests(unittest.TestCase):
@@ -82,6 +83,63 @@ class StorageTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],
         )
+
+    def test_statement_parser_splits_multiple_statements_on_one_line(self) -> None:
+        statements = _sql_statements(
+            "CREATE TABLE first (id INTEGER); CREATE TABLE second (id INTEGER);"
+        )
+
+        self.assertEqual(
+            (
+                "CREATE TABLE first (id INTEGER);",
+                "CREATE TABLE second (id INTEGER);",
+            ),
+            statements,
+        )
+
+    def test_statement_parser_preserves_semicolons_inside_quoted_text(self) -> None:
+        statements = _sql_statements(
+            "CREATE TABLE notes (text TEXT); "
+            "INSERT INTO notes VALUES ('steady; controlled');"
+        )
+
+        self.assertEqual(2, len(statements))
+        self.assertEqual(
+            "INSERT INTO notes VALUES ('steady; controlled');",
+            statements[1],
+        )
+
+    def test_statement_parser_supports_multiline_statements(self) -> None:
+        statements = _sql_statements(
+            "CREATE TABLE activities (\n"
+            "    id INTEGER PRIMARY KEY,\n"
+            "    title TEXT\n"
+            ");\n"
+        )
+
+        self.assertEqual(1, len(statements))
+        self.assertIn("title TEXT", statements[0])
+
+    def test_statement_parser_rejects_incomplete_sql(self) -> None:
+        with self.assertRaisesRegex(MigrationError, "incomplete SQL"):
+            _sql_statements("CREATE TABLE incomplete (id INTEGER)")
+
+    def test_schema_avoids_redundant_unique_indexes(self) -> None:
+        apply_migrations(self.connection)
+
+        source_reference_indexes = self._indexed_columns("source_references")
+        daily_health_indexes = self._indexed_columns("daily_health")
+
+        self.assertEqual(
+            1,
+            source_reference_indexes.count(("record_id", "source", "external_id")),
+        )
+        self.assertNotIn(
+            ("source", "external_id", "record_id"),
+            source_reference_indexes,
+        )
+        self.assertNotIn(("local_date", "record_id"), daily_health_indexes)
+        self.assertIn(("local_date",), daily_health_indexes)
 
     def test_raw_source_identity_is_deduplicated(self) -> None:
         apply_migrations(self.connection)
@@ -178,6 +236,18 @@ class StorageTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],
         )
+
+    def _indexed_columns(self, table: str) -> list[tuple[str, ...]]:
+        indexes = self.connection.execute(f"PRAGMA index_list({table})").fetchall()
+        return [
+            tuple(
+                row["name"]
+                for row in self.connection.execute(
+                    f"PRAGMA index_info({index['name']})"
+                ).fetchall()
+            )
+            for index in indexes
+        ]
 
 
 if __name__ == "__main__":
