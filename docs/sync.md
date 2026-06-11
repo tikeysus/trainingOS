@@ -2,9 +2,13 @@
 
 TrainingOS runs source adapters through `trainingos.ingestion.SyncRunner`.
 Adapters expose vendor-neutral record envelopes with an external ID, opaque
-payload, and cursor representing the position after that record. Vendor SDK
-types may exist inside an adapter and its normalization handler, but they must
-not enter domain models.
+payload, and a high-water cursor representing the durable position after that
+record. `cursor_after` must never precede the supplied checkpoint or the prior
+record's cursor, even when an adapter returns an overlapping window. Equality
+is allowed. Because cursor formats are source-specific, adapters implement
+`cursor_is_at_or_after` so the runner can reject and audit regressions before
+processing a record. Vendor SDK types may exist inside an adapter and its
+normalization handler, but they must not enter domain models.
 
 Each source has one durable checkpoint in `sync_checkpoints`. For a normal
 run, the handler's SQLite writes, run counts, and checkpoint advancement commit

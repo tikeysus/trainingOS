@@ -33,9 +33,11 @@ class FakeAdapter:
         records: tuple[SyncRecord[FixturePayload], ...],
         *,
         overlap: bool = False,
+        regress_overlap_cursor: bool = False,
     ) -> None:
         self.records = records
         self.overlap = overlap
+        self.regress_overlap_cursor = regress_overlap_cursor
         self.fetch_calls: list[str | None] = []
         self.failures_remaining = 0
 
@@ -51,8 +53,20 @@ class FakeAdapter:
 
         start = 0 if self.overlap or cursor is None else int(cursor)
         selected = self.records[start : start + limit]
+        if self.overlap and cursor is not None and not self.regress_overlap_cursor:
+            selected = tuple(
+                SyncRecord(
+                    external_id=record.external_id,
+                    cursor_after=cursor,
+                    payload=record.payload,
+                )
+                for record in selected
+            )
         done = start + len(selected) >= len(self.records)
         return SyncPage(records=selected, done=done)
+
+    def cursor_is_at_or_after(self, previous: str, candidate: str) -> bool:
+        return int(candidate) >= int(previous)
 
 
 class SyncTests(unittest.TestCase):
@@ -228,6 +242,49 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(0, second.imported_count)
         self.assertEqual(3, second.skipped_count)
         self.assertEqual(3, self._import_count())
+
+    def test_regressing_overlap_cursor_fails_without_moving_checkpoint(self) -> None:
+        first = self.runner.run(
+            FakeAdapter(self.records),
+            self._idempotent_handler,
+        )
+        regressing_records = (
+            SyncRecord(
+                external_id="activity-overlap",
+                cursor_after="2",
+                payload=FixturePayload(value="overlap"),
+            ),
+        )
+
+        second = self.runner.run(
+            FakeAdapter(
+                regressing_records,
+                overlap=True,
+                regress_overlap_cursor=True,
+            ),
+            self._idempotent_handler,
+        )
+
+        self.assertEqual(SyncStatus.COMPLETED, first.status)
+        self.assertEqual(SyncStatus.FAILED, second.status)
+        self.assertEqual("3", second.cursor_start)
+        self.assertIsNone(second.cursor_end)
+        self.assertEqual(1, second.failed_count)
+        checkpoint = self.connection.execute(
+            "SELECT cursor FROM sync_checkpoints WHERE source = 'fixture'"
+        ).fetchone()
+        error = self.connection.execute(
+            """
+            SELECT external_id, error_code, message
+            FROM sync_errors
+            WHERE sync_run_id = ?
+            """,
+            (second.sync_run_id,),
+        ).fetchone()
+        self.assertEqual("3", checkpoint["cursor"])
+        self.assertEqual("activity-overlap", error["external_id"])
+        self.assertEqual("invalid_adapter_response", error["error_code"])
+        self.assertIn("cursor regressed", error["message"])
 
     def test_exhausted_adapter_retries_fail_without_advancing_checkpoint(self) -> None:
         adapter = FakeAdapter(self.records)

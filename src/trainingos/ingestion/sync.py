@@ -46,6 +46,13 @@ class SyncProtocolError(SyncError):
 
 @dataclass(frozen=True, slots=True)
 class SyncRecord(Generic[PayloadT]):
+    """A source record paired with its non-regressing high-water cursor.
+
+    ``cursor_after`` becomes the durable checkpoint after this record commits.
+    It must be at or after the prior cursor for the source, including when the
+    adapter returns records from an overlapping window.
+    """
+
     external_id: str
     cursor_after: str
     payload: PayloadT
@@ -68,6 +75,10 @@ class SourceAdapter(Protocol[PayloadT]):
     def source(self) -> str: ...
 
     def fetch(self, cursor: str | None, limit: int) -> SyncPage[PayloadT]: ...
+
+    def cursor_is_at_or_after(self, previous: str, candidate: str) -> bool:
+        """Return whether candidate is a non-regressing source checkpoint."""
+        ...
 
 
 class RecordHandler(Protocol[PayloadT]):
@@ -165,6 +176,13 @@ class SyncRunner:
                     return self._finish(run_id, SyncStatus.FAILED)
 
                 for record in page.records:
+                    if cursor is not None and not self._validate_cursor(
+                        run_id,
+                        adapter,
+                        cursor,
+                        record,
+                    ):
+                        return self._finish(run_id, SyncStatus.FAILED)
                     processed = self._process_record(
                         run_id,
                         source,
@@ -183,6 +201,24 @@ class SyncRunner:
                 self._connection.rollback()
             self._finish(run_id, SyncStatus.CANCELLED)
             raise
+
+    def _validate_cursor(
+        self,
+        run_id: str,
+        adapter: SourceAdapter[PayloadT],
+        previous: str,
+        record: SyncRecord[PayloadT],
+    ) -> bool:
+        try:
+            if adapter.cursor_is_at_or_after(previous, record.cursor_after):
+                return True
+            error = SyncProtocolError(
+                "record cursor regressed relative to the current checkpoint"
+            )
+        except Exception as exception:
+            error = _public_error(exception)
+        self._record_terminal_error(run_id, record.external_id, error, 1)
+        return False
 
     def _fetch_page(
         self,
