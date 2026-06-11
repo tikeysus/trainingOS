@@ -13,7 +13,8 @@ Every durable entity has `RecordMetadata` containing:
 `SourceReference` records the replaceable source name, its external ID, the
 UTC sync time, and an optional opaque raw-data reference. Local user-created
 records do not need an external ID. Reconciled records can retain multiple
-source references.
+source references. Imported references also identify the versioned parser when
+one was used.
 
 `Provenance` identifies whether a record was observed, imported, entered,
 computed, or model-interpreted. Computed records also identify a versioned
@@ -42,12 +43,24 @@ are not used for quantities whose unit can vary. Canonical storage units are:
 | Speed | metre per second |
 | Pace | second per kilometre |
 | Heart rate | beat per minute |
+| VO2 max | millilitre per kilogram per minute |
 | Temperature | degree Celsius |
 | Elevation | metre |
 | Ratio and percentage | ratio, percent |
 
 Adapters are responsible for converting source values into canonical units.
 The original unit remains available in retained raw source data.
+
+## Metric availability
+
+Metric values distinguish three states:
+
+- `measured`: a numeric value and explicit unit are present, including zero
+- `unavailable`: the source supports the metric but did not provide a value
+- `unsupported`: the source does not expose the metric
+
+A missing metric row means the normalizer made no statement about that field.
+Unavailable and unsupported values do not use sentinel numbers.
 
 ## Model interpretation
 

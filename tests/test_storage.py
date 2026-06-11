@@ -42,7 +42,7 @@ class StorageTests(unittest.TestCase):
     def test_clean_database_applies_ordered_schema(self) -> None:
         applied = apply_migrations(self.connection)
 
-        self.assertEqual([1, 2], [migration.version for migration in applied])
+        self.assertEqual([1, 2, 3], [migration.version for migration in applied])
         tables = {
             row[0]
             for row in self.connection.execute(
@@ -79,11 +79,47 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(
-            2,
+            3,
             self.connection.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],
         )
+
+    def test_metric_status_migration_preserves_existing_measured_values(
+        self,
+    ) -> None:
+        migrations = discover_migrations()
+        apply_migrations(self.connection, migrations[:2])
+        self.connection.execute(
+            """
+            INSERT INTO records (
+                record_id, record_type, timezone, created_at, updated_at
+            ) VALUES (
+                'health-1', 'daily_health', 'America/Toronto',
+                '2026-06-11T10:00:00+00:00',
+                '2026-06-11T10:00:00+00:00'
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            INSERT INTO metric_values (
+                owner_record_id, metric_key, metric_value, unit, quality
+            ) VALUES ('health-1', 'resting_heart_rate', 48, 'bpm', 0.9)
+            """
+        )
+        self.connection.commit()
+
+        apply_migrations(self.connection, migrations)
+
+        row = self.connection.execute(
+            """
+            SELECT metric_status, metric_value, unit, quality
+            FROM metric_values
+            WHERE owner_record_id = 'health-1'
+            """
+        ).fetchone()
+        self.assertEqual(("measured", 48.0, "bpm", 0.9), tuple(row))
 
     def test_statement_parser_splits_multiple_statements_on_one_line(self) -> None:
         statements = _sql_statements(
