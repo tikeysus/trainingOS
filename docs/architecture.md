@@ -12,7 +12,7 @@ sources -> nightly sync -> SQLite -> derived metrics -> retrieval -> UI/coach
 | --- | --- | --- |
 | `domain` | Vendor-neutral entities, identifiers, units, timestamps, provenance | Python standard library only |
 | `storage` | SQLite connections, schema, and ordered migrations | Python standard library only |
-| `ingestion` | Source adapters, raw payload retention, sync cursors | `domain` |
+| `ingestion` | Source adapters, raw payload retention, sync cursors | `domain`, SQLite connection contracts from `storage` |
 | `normalization` | Conversion from source records to canonical entities | `domain`, adapter contracts from `ingestion` |
 | `analytics` | Deterministic, versioned metric calculations | `domain` |
 | `retrieval` | Local evidence documents and retrieval contracts | `domain` |
@@ -43,6 +43,10 @@ the domain model. An adapter translates Garmin identifiers and payloads into:
 
 Manual FIT and future source adapters use the same boundary. A canonical
 record may have multiple source references when records are reconciled.
+
+The shared sync runner advances each source checkpoint in the same transaction
+as the handler's durable writes. See [sync.md](sync.md) for retry, resume,
+dry-run, and local scheduling behavior.
 
 ## Durable data rules
 
