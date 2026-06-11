@@ -4,9 +4,11 @@ TrainingOS is a local-first running intelligence platform. Durable facts,
 derived metrics, retrieval documents, and presentation views are built from a
 local SQLite data store rather than live vendor queries.
 
-The initial code defines the vendor-neutral domain language and package
-boundaries. See [docs/architecture.md](docs/architecture.md) and
-[docs/domain-conventions.md](docs/domain-conventions.md).
+The initial code defines the vendor-neutral domain language, package
+boundaries, and local SQLite foundation. See
+[docs/architecture.md](docs/architecture.md),
+[docs/domain-conventions.md](docs/domain-conventions.md), and
+[docs/storage.md](docs/storage.md).
 
 ## Development
 
@@ -15,4 +17,13 @@ dependencies.
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+Set `TRAININGOS_DB_PATH` to override the default database at
+`~/.local/share/trainingos/trainingos.sqlite3`.
+
+Initialize or update the configured database with:
+
+```sh
+PYTHONPATH=src python3 -m trainingos.storage
 ```
