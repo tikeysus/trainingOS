@@ -11,6 +11,7 @@ sources -> nightly sync -> SQLite -> derived metrics -> retrieval -> UI/coach
 | Package | Owns | May depend on |
 | --- | --- | --- |
 | `domain` | Vendor-neutral entities, identifiers, units, timestamps, provenance | Python standard library only |
+| `storage` | SQLite connections, schema, and ordered migrations | Python standard library only |
 | `ingestion` | Source adapters, raw payload retention, sync cursors | `domain` |
 | `normalization` | Conversion from source records to canonical entities | `domain`, adapter contracts from `ingestion` |
 | `analytics` | Deterministic, versioned metric calculations | `domain` |
@@ -26,6 +27,10 @@ source services for stored facts.
 SQLite persistence will implement repositories around domain entities rather
 than becoming part of those entities. This keeps schema and adapter concerns
 replaceable while preserving a stable domain language.
+
+The `storage` package owns SQLite mechanics and may not shape domain models.
+Feature packages can depend on its connection and future repository contracts,
+but the `domain` package remains independent of persistence.
 
 ## Source adapter boundary
 
