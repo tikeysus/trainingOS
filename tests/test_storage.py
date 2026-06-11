@@ -42,7 +42,7 @@ class StorageTests(unittest.TestCase):
     def test_clean_database_applies_ordered_schema(self) -> None:
         applied = apply_migrations(self.connection)
 
-        self.assertEqual([1], [migration.version for migration in applied])
+        self.assertEqual([1, 2], [migration.version for migration in applied])
         tables = {
             row[0]
             for row in self.connection.execute(
@@ -54,6 +54,7 @@ class StorageTests(unittest.TestCase):
                 "schema_migrations",
                 "sync_runs",
                 "sync_errors",
+                "sync_checkpoints",
                 "raw_source_records",
                 "records",
                 "source_references",
@@ -78,7 +79,7 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(
-            1,
+            2,
             self.connection.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],
@@ -206,7 +207,7 @@ class StorageTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(MigrationError, "does not match"):
-            apply_migrations(self.connection, (changed,))
+            apply_migrations(self.connection, (changed, *migrations[1:]))
 
     def test_failed_migration_rolls_back_its_schema_changes(self) -> None:
         broken = Migration(
