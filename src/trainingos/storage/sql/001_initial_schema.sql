@@ -84,8 +84,7 @@ CREATE TABLE source_references (
     external_id TEXT NOT NULL,
     synced_at TEXT NOT NULL,
     raw_record_id TEXT REFERENCES raw_source_records(raw_record_id),
-    UNIQUE (record_id, source, external_id),
-    UNIQUE (source, external_id, record_id)
+    UNIQUE (record_id, source, external_id)
 );
 
 CREATE INDEX idx_source_references_source_external_id
@@ -140,8 +139,7 @@ ON activity_samples (activity_id, recorded_at);
 
 CREATE TABLE daily_health (
     record_id TEXT PRIMARY KEY REFERENCES records(record_id) ON DELETE CASCADE,
-    local_date TEXT NOT NULL,
-    UNIQUE (local_date, record_id)
+    local_date TEXT NOT NULL
 );
 
 CREATE INDEX idx_daily_health_local_date

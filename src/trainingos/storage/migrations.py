@@ -144,9 +144,9 @@ def _apply_migration(
 def _sql_statements(sql: str) -> tuple[str, ...]:
     statements: list[str] = []
     buffer = ""
-    for line in sql.splitlines(keepends=True):
-        buffer += line
-        if sqlite3.complete_statement(buffer):
+    for character in sql:
+        buffer += character
+        if character == ";" and sqlite3.complete_statement(buffer):
             statement = buffer.strip()
             if statement:
                 statements.append(statement)
