@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+.coverage
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Local configuration, credentials, and durable personal data.
+.env
+.env.*
+!.env.example
+data/
+imports/
+private/
+raw/
+secrets/
+*.db
+*.sqlite
+*.sqlite3
+*.fit
+!tests/fixtures/sanitized/*.fit
