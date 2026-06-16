@@ -10,6 +10,13 @@ export TRAININGOS_DB_PATH=/path/to/trainingos.sqlite3
 Database files, local environment files, credentials, and personal source data
 must not be committed.
 
+Raw FIT/API artifacts default to `~/.local/share/trainingos/raw` and can be
+overridden with:
+
+```sh
+export TRAININGOS_RAW_DATA_DIR=/path/to/raw-artifacts
+```
+
 ## Migrations
 
 Ordered SQL migrations live in `trainingos.storage.sql` and use filenames such
@@ -34,7 +41,8 @@ applied migration.
   timezone on their parent `records` row.
 - Canonical quantities use explicit unit columns or unit-specific column names.
 - Raw source records retain source identity, checksum, ingestion time, and
-  either inline payload bytes or a local storage path.
+  either inline payload bytes or a local storage path. FIT files are retained
+  as content-addressed local files and referenced from SQLite.
 - Source references and sync audit rows support idempotent import and resume
   behavior without embedding vendor types in canonical tables.
 - Each normalized source identity maps to one local record and references a

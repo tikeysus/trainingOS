@@ -1,5 +1,24 @@
 """Replaceable source adapters and auditable sync orchestration."""
 
+from trainingos.ingestion.fit import (
+    FIT_PARSER,
+    MANUAL_FIT_SOURCE,
+    FitImportPayload,
+    FitMessage,
+    ManualFitAdapter,
+    ManualFitHandler,
+    ParsedFitActivity,
+    parse_fit_messages,
+    read_fit_messages,
+)
+from trainingos.ingestion.garmin import (
+    GARMIN_SOURCE,
+    GarminActivityAdapter,
+    GarminActivityPage,
+    GarminActivitySummary,
+    GarminClient,
+)
+from trainingos.ingestion.raw import RawArtifact, RawArtifactStore
 from trainingos.ingestion.sync import (
     RecordHandler,
     RetryPolicy,
@@ -16,6 +35,20 @@ from trainingos.ingestion.sync import (
 )
 
 __all__ = [
+    "FIT_PARSER",
+    "GARMIN_SOURCE",
+    "MANUAL_FIT_SOURCE",
+    "FitImportPayload",
+    "FitMessage",
+    "GarminActivityAdapter",
+    "GarminActivityPage",
+    "GarminActivitySummary",
+    "GarminClient",
+    "ManualFitAdapter",
+    "ManualFitHandler",
+    "ParsedFitActivity",
+    "RawArtifact",
+    "RawArtifactStore",
     "RecordHandler",
     "RetryPolicy",
     "SourceAdapter",
@@ -28,4 +61,6 @@ __all__ = [
     "SyncReport",
     "SyncRunner",
     "SyncStatus",
+    "parse_fit_messages",
+    "read_fit_messages",
 ]
