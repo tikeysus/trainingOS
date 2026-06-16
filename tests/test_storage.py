@@ -43,7 +43,7 @@ class StorageTests(unittest.TestCase):
         applied = apply_migrations(self.connection)
 
         self.assertEqual(
-            [1, 2, 3, 4, 5, 6],
+            [1, 2, 3, 4, 5, 6, 7],
             [migration.version for migration in applied],
         )
         tables = {
@@ -79,6 +79,22 @@ class StorageTests(unittest.TestCase):
                 "retrieval_document_fts",
             }.issubset(tables)
         )
+        views = {
+            row[0]
+            for row in self.connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'view'"
+            )
+        }
+        self.assertTrue(
+            {
+                "dashboard_weekly_training",
+                "dashboard_metric_timeseries",
+                "dashboard_block_comparison",
+                "dashboard_evidence_documents",
+                "dashboard_context_annotations",
+                "dashboard_race_projection_status",
+            }.issubset(views)
+        )
 
     def test_reapplying_migrations_is_idempotent(self) -> None:
         first = apply_migrations(self.connection)
@@ -86,7 +102,7 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(
-            6,
+            7,
             self.connection.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],
