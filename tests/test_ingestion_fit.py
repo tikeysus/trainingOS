@@ -4,8 +4,10 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from trainingos.config import AppConfig
 from trainingos.ingestion import (
     FitMessage,
     ManualFitAdapter,
@@ -15,6 +17,7 @@ from trainingos.ingestion import (
     SyncStatus,
     parse_fit_messages,
 )
+from trainingos.ingestion import fit_import
 from trainingos.storage import apply_migrations, connect_database
 
 
@@ -173,6 +176,88 @@ class FitIngestionTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(1, self._count("raw_source_records"))
         self.assertTrue(first.storage_path.exists())
+
+    def test_fit_import_main_wires_config_migrations_and_sync_runner(self) -> None:
+        database_path = self.root / "cli.sqlite3"
+        raw_data_dir = self.root / "cli-raw"
+        connection = unittest.mock.Mock()
+        runner = unittest.mock.Mock()
+        runner.run.return_value = SimpleNamespace(status=SyncStatus.COMPLETED)
+
+        with (
+            patch.object(
+                fit_import.AppConfig,
+                "from_env",
+                return_value=AppConfig(
+                    database_path=database_path,
+                    raw_data_dir=raw_data_dir,
+                    local_timezone="America/Toronto",
+                ),
+            ) as from_env,
+            patch.object(
+                fit_import,
+                "connect_database",
+                return_value=connection,
+            ) as connect_database_mock,
+            patch.object(fit_import, "apply_migrations") as apply_migrations_mock,
+            patch.object(fit_import, "ManualFitAdapter") as adapter_class,
+            patch.object(fit_import, "RawArtifactStore") as raw_store_class,
+            patch.object(fit_import, "ManualFitHandler") as handler_class,
+            patch.object(
+                fit_import,
+                "SyncRunner",
+                return_value=runner,
+            ) as runner_class,
+        ):
+            exit_code = fit_import.main(["--timezone", "UTC", "workout.fit"])
+
+        self.assertEqual(0, exit_code)
+        from_env.assert_called_once_with()
+        connect_database_mock.assert_called_once_with(database_path)
+        apply_migrations_mock.assert_called_once_with(connection)
+        adapter_class.assert_called_once_with([Path("workout.fit")])
+        raw_store_class.assert_called_once_with(raw_data_dir)
+        handler_class.assert_called_once_with(
+            raw_store_class.return_value,
+            timezone="UTC",
+        )
+        runner_class.assert_called_once_with(connection)
+        runner.run.assert_called_once_with(
+            adapter_class.return_value,
+            handler_class.return_value,
+        )
+        connection.close.assert_called_once_with()
+
+    def test_fit_import_main_uses_config_timezone_and_returns_failure(self) -> None:
+        connection = unittest.mock.Mock()
+        runner = unittest.mock.Mock()
+        runner.run.return_value = SimpleNamespace(status=SyncStatus.FAILED)
+
+        with (
+            patch.object(
+                fit_import.AppConfig,
+                "from_env",
+                return_value=AppConfig(
+                    database_path=self.root / "cli.sqlite3",
+                    raw_data_dir=self.root / "cli-raw",
+                    local_timezone="America/Toronto",
+                ),
+            ),
+            patch.object(fit_import, "connect_database", return_value=connection),
+            patch.object(fit_import, "apply_migrations"),
+            patch.object(fit_import, "ManualFitAdapter"),
+            patch.object(fit_import, "RawArtifactStore") as raw_store_class,
+            patch.object(fit_import, "ManualFitHandler") as handler_class,
+            patch.object(fit_import, "SyncRunner", return_value=runner),
+        ):
+            exit_code = fit_import.main(["workout.fit"])
+
+        self.assertEqual(1, exit_code)
+        handler_class.assert_called_once_with(
+            raw_store_class.return_value,
+            timezone="America/Toronto",
+        )
+        connection.close.assert_called_once_with()
 
     def _messages(self) -> tuple[FitMessage, ...]:
         return (
