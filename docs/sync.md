@@ -78,3 +78,23 @@ That command can be called by `cron`, `launchd`, or another nightly local
 scheduler. It requires no cloud service. The scheduler should treat a
 `failed` report as a failed job and use the persisted `sync_run_id` for
 diagnosis.
+
+## Manual FIT import
+
+Manual FIT import uses the same sync runner and normalization boundary as
+vendor adapters:
+
+```sh
+PYTHONPATH=src python3 -m trainingos.ingestion.fit_import /path/to/file-or-dir
+```
+
+The command recursively imports `.fit` files from directories, retains raw FIT
+bytes under the configured raw artifact directory, and stores only local SQLite
+lineage to those artifacts. FIT timestamps are normalized to UTC; record
+metadata uses `TRAININGOS_LOCAL_TIMEZONE` or the `--timezone` CLI option for
+the explicit IANA timezone.
+
+Garmin ingestion is represented by an adapter over an injected client protocol.
+Concrete live clients must keep credentials in local configuration or secret
+storage and must not store tokens in cursors, logs, fixtures, or raw audit
+metadata.
