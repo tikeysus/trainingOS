@@ -8,7 +8,8 @@ The initial code defines the vendor-neutral domain language, package
 boundaries, and local SQLite foundation. See
 [docs/architecture.md](docs/architecture.md),
 [docs/domain-conventions.md](docs/domain-conventions.md),
-[docs/analytics.md](docs/analytics.md), and
+[docs/analytics.md](docs/analytics.md),
+[docs/dashboard.md](docs/dashboard.md), and
 [docs/storage.md](docs/storage.md).
 
 ## Development
