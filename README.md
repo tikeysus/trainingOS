@@ -12,8 +12,7 @@ boundaries, and local SQLite foundation. See
 
 ## Development
 
-TrainingOS currently requires Python 3.12 or newer and has no runtime
-dependencies.
+TrainingOS currently requires Python 3.12 or newer.
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests
@@ -21,9 +20,18 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 Set `TRAININGOS_DB_PATH` to override the default database at
 `~/.local/share/trainingos/trainingos.sqlite3`.
+Set `TRAININGOS_RAW_DATA_DIR` to override retained raw artifacts at
+`~/.local/share/trainingos/raw`, and `TRAININGOS_LOCAL_TIMEZONE` to choose the
+default IANA timezone for manual imports.
 
 Initialize or update the configured database with:
 
 ```sh
 PYTHONPATH=src python3 -m trainingos.storage
+```
+
+Import local FIT files with:
+
+```sh
+PYTHONPATH=src python3 -m trainingos.ingestion.fit_import /path/to/export
 ```
