@@ -55,14 +55,23 @@ applied migration.
 
 ## Normalized writes
 
-`NormalizationStore` writes activities, laps, activity samples, and daily
-health records through vendor-neutral domain models. It does not commit, so a
-sync handler can persist normalized rows and advance its checkpoint in one
-transaction.
+`NormalizationStore` writes activities, laps, activity samples, daily health,
+context notes, and weather observations through vendor-neutral domain models.
+It does not commit, so a sync handler can persist normalized rows and advance
+its checkpoint in one transaction.
 
 Normalized imported records require at least one source reference backed by a
 retained raw source record. The raw record links the canonical entity to its
-sync run. Source references also retain the parser name and version.
+sync run. Source references also retain the parser name and version. Local
+user-entered records, such as context notes and manual weather, use
+`user_entered` provenance and do not require source references.
+
+Context notes are timestamped, typed, editable, and can link to existing local
+records such as activities, races, or training blocks. Weather observations are
+linked to activities through SQLite and store observation time, timezone,
+source, raw lineage, explicit units, and metric availability. Weather
+enrichment runs before query time; dashboards and coach retrieval read these
+persisted rows and do not call live weather services.
 
 Upsert precedence is deterministic:
 

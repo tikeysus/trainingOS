@@ -9,14 +9,17 @@ from datetime import UTC, datetime
 from trainingos.domain import (
     Activity,
     ActivitySample,
+    ContextNote,
     DailyHealth,
     Lap,
     Measurement,
     MetricStatus,
     MetricValue,
+    ProvenanceKind,
     RecordMetadata,
     SourceReference,
     Unit,
+    WeatherObservation,
 )
 
 _UNIT_TO_BASE: dict[Unit, tuple[str, float]] = {
@@ -145,8 +148,84 @@ class NormalizationStore:
             health.metrics,
         )
 
+    def upsert_context_note(self, note: ContextNote) -> None:
+        if not self._upsert_record(note.metadata, "context_note"):
+            return
+        self._connection.execute(
+            """
+            INSERT INTO context_notes (
+                record_id, occurred_at, note_kind, note_text
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT (record_id) DO UPDATE SET
+                occurred_at = excluded.occurred_at,
+                note_kind = excluded.note_kind,
+                note_text = excluded.note_text
+            """,
+            (
+                note.metadata.record_id,
+                _timestamp(note.occurred_at),
+                note.kind.value,
+                note.text,
+            ),
+        )
+        self._connection.execute(
+            "DELETE FROM context_note_links WHERE note_id = ?",
+            (note.metadata.record_id,),
+        )
+        self._connection.executemany(
+            """
+            INSERT INTO context_note_links (note_id, linked_record_id)
+            VALUES (?, ?)
+            """,
+            (
+                (note.metadata.record_id, linked_record_id)
+                for linked_record_id in note.linked_record_ids
+            ),
+        )
+
+    def upsert_weather_observation(
+        self,
+        observation: WeatherObservation,
+        *,
+        activity_id: str | None = None,
+    ) -> None:
+        updated = self._upsert_record(observation.metadata, "weather_observation")
+        if updated:
+            self._connection.execute(
+                """
+                INSERT INTO weather_observations (
+                    record_id, observed_at, condition
+                ) VALUES (?, ?, ?)
+                ON CONFLICT (record_id) DO UPDATE SET
+                    observed_at = excluded.observed_at,
+                    condition = excluded.condition
+                """,
+                (
+                    observation.metadata.record_id,
+                    _timestamp(observation.observed_at),
+                    observation.condition,
+                ),
+            )
+            self._upsert_metrics(
+                observation.metadata.record_id,
+                observation.metrics,
+            )
+        if activity_id is not None:
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO activity_weather_observations (
+                    activity_id, weather_observation_id, linked_at
+                ) VALUES (?, ?, ?)
+                """,
+                (
+                    activity_id,
+                    observation.metadata.record_id,
+                    _timestamp(observation.metadata.updated_at),
+                ),
+            )
+
     def _upsert_record(self, metadata: RecordMetadata, record_type: str) -> bool:
-        self._validate_source_references(metadata.source_references)
+        self._validate_source_references(metadata, metadata.source_references)
         existing = self._connection.execute(
             """
             SELECT record_type, updated_at
@@ -207,10 +286,18 @@ class NormalizationStore:
 
     def _validate_source_references(
         self,
+        metadata: RecordMetadata,
         references: tuple[SourceReference, ...],
     ) -> None:
         if not references:
-            raise ValueError("normalized record requires a source reference")
+            if (
+                metadata.provenance is not None
+                and metadata.provenance.kind is ProvenanceKind.USER_ENTERED
+            ):
+                return
+            raise ValueError(
+                "normalized non-user-entered record requires a source reference"
+            )
         for reference in references:
             if reference.raw_reference is None:
                 raise ValueError(
