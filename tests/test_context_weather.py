@@ -246,6 +246,69 @@ class ContextWeatherTests(unittest.TestCase):
         self.assertIsNone(row["unit"])
         self.assertIn("no_station_observation", row["attributes_json"])
 
+    def test_weather_adapter_failure_is_persisted_as_unavailable(self) -> None:
+        adapter = FailingWeatherAdapter()
+        enricher = WeatherEnricher(
+            adapter=adapter,
+            raw_store=self.raw_store,
+            clock=lambda: datetime(2026, 11, 1, 7, 0, tzinfo=UTC),
+        )
+
+        observation = enricher.enrich_activity(
+            self.connection,
+            self.store,
+            self.activity,
+            sync_run_id="run-weather-1",
+        )
+
+        self.assertEqual(
+            WeatherRequest(
+                activity_id="activity-1",
+                started_at=datetime(2026, 11, 1, 5, 30, tzinfo=UTC),
+                timezone="America/Toronto",
+            ),
+            adapter.requests[0],
+        )
+        self.assertEqual(
+            "weather:fixture_weather:activity-1:weather",
+            observation.metadata.record_id,
+        )
+        row = self.connection.execute(
+            """
+            SELECT metric_status, metric_value, unit, attributes_json
+            FROM metric_values
+            WHERE owner_record_id = 'weather:fixture_weather:activity-1:weather'
+              AND metric_key = 'weather'
+            """
+        ).fetchone()
+        self.assertEqual("unavailable", row["metric_status"])
+        self.assertIsNone(row["metric_value"])
+        self.assertIsNone(row["unit"])
+        self.assertIn("adapter_error", row["attributes_json"])
+        raw = self.connection.execute(
+            """
+            SELECT raw.storage_path, raw.content_type
+            FROM source_references AS reference
+            JOIN raw_source_records AS raw
+              ON raw.raw_record_id = reference.raw_record_id
+            WHERE reference.record_id = 'weather:fixture_weather:activity-1:weather'
+            """
+        ).fetchone()
+        self.assertEqual("application/json", raw["content_type"])
+        self.assertIn("adapter_error", Path(raw["storage_path"]).read_text())
+        self.assertEqual(
+            1,
+            self.connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM activity_weather_observations
+                WHERE activity_id = 'activity-1'
+                  AND weather_observation_id =
+                      'weather:fixture_weather:activity-1:weather'
+                """
+            ).fetchone()[0],
+        )
+
     def test_weather_metric_quality_prevents_unavailable_overwrite(self) -> None:
         measured = self._manual_weather(
             record_id="weather-manual-1",
@@ -385,6 +448,17 @@ class FixtureWeatherAdapter:
     def fetch(self, request: WeatherRequest) -> WeatherFetchResult:
         self.requests.append(request)
         return self._result
+
+
+class FailingWeatherAdapter:
+    source = "fixture_weather"
+
+    def __init__(self) -> None:
+        self.requests: list[WeatherRequest] = []
+
+    def fetch(self, request: WeatherRequest) -> WeatherFetchResult:
+        self.requests.append(request)
+        raise RuntimeError("token=private-weather-fixture")
 
 
 if __name__ == "__main__":
