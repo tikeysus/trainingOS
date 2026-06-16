@@ -42,7 +42,7 @@ class StorageTests(unittest.TestCase):
     def test_clean_database_applies_ordered_schema(self) -> None:
         applied = apply_migrations(self.connection)
 
-        self.assertEqual([1, 2, 3], [migration.version for migration in applied])
+        self.assertEqual([1, 2, 3, 4], [migration.version for migration in applied])
         tables = {
             row[0]
             for row in self.connection.execute(
@@ -63,6 +63,7 @@ class StorageTests(unittest.TestCase):
                 "activity_samples",
                 "daily_health",
                 "context_notes",
+                "activity_weather_observations",
                 "weather_observations",
                 "races",
                 "training_blocks",
@@ -79,7 +80,7 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(
-            3,
+            4,
             self.connection.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],
