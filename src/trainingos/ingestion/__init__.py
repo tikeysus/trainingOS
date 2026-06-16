@@ -33,6 +33,13 @@ from trainingos.ingestion.sync import (
     SyncRunner,
     SyncStatus,
 )
+from trainingos.ingestion.weather import (
+    HistoricalWeatherAdapter,
+    WeatherEnricher,
+    WeatherFetchResult,
+    WeatherRequest,
+    temperature_celsius,
+)
 
 __all__ = [
     "FIT_PARSER",
@@ -44,6 +51,7 @@ __all__ = [
     "GarminActivityPage",
     "GarminActivitySummary",
     "GarminClient",
+    "HistoricalWeatherAdapter",
     "ManualFitAdapter",
     "ManualFitHandler",
     "ParsedFitActivity",
@@ -61,6 +69,10 @@ __all__ = [
     "SyncReport",
     "SyncRunner",
     "SyncStatus",
+    "WeatherEnricher",
+    "WeatherFetchResult",
+    "WeatherRequest",
     "parse_fit_messages",
     "read_fit_messages",
+    "temperature_celsius",
 ]
