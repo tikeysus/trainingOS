@@ -1,0 +1,491 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "datasource": {
+          "type": "frser-sqlite-datasource",
+          "uid": "trainingos-sqlite"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "rgba(31, 120, 193, 1)",
+        "name": "Context, races, and blocks",
+        "rawSql": "SELECT occurred_at AS time, label || ': ' || text AS text, annotation_type AS tags FROM dashboard_context_annotations ORDER BY occurred_at",
+        "target": {
+          "rawSql": "SELECT occurred_at AS time, label || ': ' || text AS text, annotation_type AS tags FROM dashboard_context_annotations ORDER BY occurred_at"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "km"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT week_start_date AS time, distance_kilometres AS weekly_distance_km FROM dashboard_weekly_training ORDER BY week_start_date",
+          "refId": "A"
+        }
+      ],
+      "title": "Weekly Distance",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT window_start AS time, metric_value AS training_load_ratio FROM dashboard_metric_timeseries WHERE metric_key = 'training_load_trend' ORDER BY window_start",
+          "refId": "A"
+        }
+      ],
+      "title": "Training Load Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "km"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT week_start_date AS time, long_run_kilometres AS long_run_km FROM dashboard_weekly_training ORDER BY week_start_date",
+          "refId": "A"
+        }
+      ],
+      "title": "Long Run Progression",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "m"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT window_start AS time, metric_value AS marathon_pace_metres FROM dashboard_metric_timeseries WHERE metric_key = 'marathon_pace_volume' ORDER BY window_start",
+          "refId": "A"
+        }
+      ],
+      "title": "Marathon-Pace Volume",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT window_start AS time, metric_value AS aerobic_efficiency FROM dashboard_metric_timeseries WHERE metric_key = 'aerobic_efficiency' ORDER BY window_start",
+          "refId": "A"
+        }
+      ],
+      "title": "Aerobic Efficiency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT window_start AS time, metric_value AS heart_rate_drift_percent FROM dashboard_metric_timeseries WHERE metric_key = 'heart_rate_drift' ORDER BY window_start",
+          "refId": "A"
+        }
+      ],
+      "title": "Heart-Rate Drift",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT window_start AS time, metric_value AS recovery_coverage FROM dashboard_metric_timeseries WHERE metric_key = 'recovery_coverage' ORDER BY window_start",
+          "refId": "A"
+        }
+      ],
+      "title": "Recovery Coverage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 8,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "table",
+          "rawSql": "SELECT current_block_name, current_distance_kilometres, current_run_count, previous_block_name, previous_distance_kilometres, previous_run_count, distance_delta_metres / 1000.0 AS distance_delta_km, run_count_delta, caveat FROM dashboard_block_comparison",
+          "refId": "A"
+        }
+      ],
+      "title": "Current vs Prior Block",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 9,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "table",
+          "rawSql": "SELECT race_name, started_at, target_duration_seconds, projection_status, projected_duration_seconds, uncertainty_seconds, caveat FROM dashboard_race_projection_status ORDER BY started_at",
+          "refId": "A"
+        }
+      ],
+      "title": "Race Projection Evidence",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 10,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "table",
+          "rawSql": "SELECT week_start_date, data_gaps_json, caveats FROM dashboard_weekly_training WHERE data_gaps_json != '[]' OR caveats IS NOT NULL ORDER BY week_start_date DESC LIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "title": "Missing Data and Caveats",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "trainingos-sqlite"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 11,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "trainingos-sqlite"
+          },
+          "format": "table",
+          "rawSql": "SELECT document_type, title, source_record_id, evidence_json, caveats_json, stale_reason, generated_at FROM dashboard_evidence_documents ORDER BY generated_at DESC, document_type LIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Evidence Documents",
+      "type": "table"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 40,
+  "style": "light",
+  "tags": [
+    "trainingos",
+    "local",
+    "sqlite"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-180d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "TrainingOS Local Dashboard",
+  "uid": "trainingos-local-dashboard",
+  "version": 1,
+  "weekStart": "monday"
+}
