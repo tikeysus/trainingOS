@@ -9,7 +9,8 @@ call Garmin, Strava, weather services, or AI providers.
 Apply migrations to the database you want Grafana to read:
 
 ```sh
-export TRAININGOS_DB_PATH=/path/to/trainingos.sqlite3
+mkdir -p var
+export TRAININGOS_DB_PATH="$PWD/var/trainingos.sqlite3"
 PYTHONPATH=src python3 -m trainingos.storage
 ```
 
@@ -18,16 +19,27 @@ Expensive calculations are expected to be persisted before request time.
 
 ## Run Grafana
 
-The Docker Compose setup provisions:
+The Grafana launcher provisions:
 
 - the `frser-sqlite-datasource` Grafana datasource plugin.
 - a read-only SQLite datasource at `/var/lib/trainingos/trainingos.sqlite3`.
 - the TrainingOS dashboard from `grafana/dashboards`.
 
 ```sh
-export TRAININGOS_DB_PATH=/path/to/trainingos.sqlite3
-docker compose up grafana
+export TRAININGOS_DB_PATH="$PWD/var/trainingos.sqlite3"
+sh scripts/run-grafana.sh
 ```
+
+The dashboard includes an `Ask Local Coach` link to `http://localhost:8765`.
+Start the local coach UI separately with:
+
+```sh
+export TRAININGOS_DB_PATH="$PWD/var/trainingos.sqlite3"
+PYTHONPATH=src python3 -m trainingos.coach_web
+```
+
+Grafana still does not call the AI provider. The linked coach UI owns the
+local Ollama request after it retrieves bounded evidence from SQLite.
 
 Grafana listens on `http://localhost:3000` by default. Set
 `TRAININGOS_GRAFANA_PORT` to use a different host port.

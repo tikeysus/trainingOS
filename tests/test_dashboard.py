@@ -383,6 +383,21 @@ class GrafanaDashboardDefinitionTests(unittest.TestCase):
 
         self.assertEqual("trainingos-local-dashboard", dashboard["uid"])
         self.assertEqual("TrainingOS Local Dashboard", dashboard["title"])
+        self.assertIn(
+            {
+                "asDropdown": False,
+                "icon": "external link",
+                "includeVars": False,
+                "keepTime": False,
+                "tags": [],
+                "targetBlank": True,
+                "title": "Ask Local Coach",
+                "tooltip": "Open the local TrainingOS coach chat UI",
+                "type": "link",
+                "url": "http://localhost:8765",
+            },
+            dashboard["links"],
+        )
         panel_ids = [panel["id"] for panel in dashboard["panels"]]
         self.assertEqual(len(panel_ids), len(set(panel_ids)))
         self.assertGreaterEqual(len(panel_ids), 10)
