@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import zipfile
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -54,6 +56,10 @@ class FitIngestionTests(unittest.TestCase):
         self.assertEqual(10000.0, parsed.activity.distance.value)
         self.assertEqual(2, len(parsed.laps))
         self.assertEqual(2, len(parsed.samples))
+        self.assertEqual(
+            parsed.laps[1].started_at,
+            parsed.laps[1].metadata.updated_at,
+        )
         self.assertEqual("America/Toronto", parsed.activity.metadata.timezone)
         self.assertEqual(
             ("fitdecode_fit_parser", "1.0.0"),
@@ -109,6 +115,59 @@ class FitIngestionTests(unittest.TestCase):
         self.assertIsNone(raw["payload"])
         self.assertEqual(b"sanitized fit bytes", Path(raw["storage_path"]).read_bytes())
         self.assertTrue(str(raw["storage_path"]).startswith(str(self.raw_dir)))
+
+    def test_garmin_export_zip_discovers_nested_fit_files_without_pii(self) -> None:
+        outer_zip = self.root / "garmin-export.zip"
+        nested_bytes = BytesIO()
+        with zipfile.ZipFile(nested_bytes, "w") as nested:
+            nested.writestr("runner@example.com_123.fit", b"activity fit")
+            nested.writestr("runner@example.com_profile.json", b'{"ignored": true}')
+        with zipfile.ZipFile(outer_zip, "w") as outer:
+            outer.writestr("customer_data/customer.json", b'{"ignored": true}')
+            outer.writestr(
+                "DI_CONNECT/DI-Connect-Uploaded-Files/UploadedFiles_0-_Part1.zip",
+                nested_bytes.getvalue(),
+            )
+
+        adapter = ManualFitAdapter((outer_zip,))
+        page = adapter.fetch(None, 100)
+
+        self.assertEqual(1, len(page.records))
+        record = page.records[0]
+        self.assertTrue(record.external_id.startswith("zip-fit:1:1:sha256:"))
+        self.assertNotIn("runner@example.com", record.external_id)
+        self.assertEqual(b"activity fit", record.payload.path.read_bytes())
+        self.assertTrue(record.payload.skip_missing_session)
+
+    def test_garmin_export_zip_skips_non_activity_fit_and_imports_activity(
+        self,
+    ) -> None:
+        export_zip = self.root / "garmin-export.zip"
+        with zipfile.ZipFile(export_zip, "w") as archive:
+            archive.writestr("a-device-settings.fit", b"settings fit")
+            archive.writestr("b-activity.fit", b"activity fit")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="America/Toronto",
+            clock=self.clock,
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            side_effect=((), self._messages()),
+        ):
+            report = runner.run(ManualFitAdapter((export_zip,)), handler)
+
+        self.assertEqual(SyncStatus.COMPLETED, report.status)
+        self.assertEqual(1, report.imported_count)
+        self.assertEqual(1, report.skipped_count)
+        self.assertEqual(1, self._count("raw_source_records"))
+        self.assertEqual(1, self._count("activities"))
+        raw = self.connection.execute(
+            "SELECT storage_path FROM raw_source_records WHERE source = 'manual_fit'"
+        ).fetchone()
+        self.assertEqual(b"activity fit", Path(raw["storage_path"]).read_bytes())
 
     def test_malformed_fit_fails_without_normalized_or_raw_rows(self) -> None:
         fit_path = self.root / "malformed.fit"
@@ -291,7 +350,7 @@ class FitIngestionTests(unittest.TestCase):
                 "lap",
                 {
                     "start_time": datetime(2026, 6, 16, 10, 30, tzinfo=UTC),
-                    "timestamp": datetime(2026, 6, 16, 11, 0, tzinfo=UTC),
+                    "timestamp": datetime(2026, 6, 16, 10, 29, tzinfo=UTC),
                     "total_timer_time": 1800,
                     "total_distance": 5000,
                 },

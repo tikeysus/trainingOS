@@ -85,14 +85,17 @@ Manual FIT import uses the same sync runner and normalization boundary as
 vendor adapters:
 
 ```sh
-PYTHONPATH=src python3 -m trainingos.ingestion.fit_import /path/to/file-or-dir
+PYTHONPATH=src python3 -m trainingos.ingestion.fit_import /path/to/file-dir-or-export.zip
 ```
 
-The command recursively imports `.fit` files from directories, retains raw FIT
-bytes under the configured raw artifact directory, and stores only local SQLite
-lineage to those artifacts. FIT timestamps are normalized to UTC; record
-metadata uses `TRAININGOS_LOCAL_TIMEZONE` or the `--timezone` CLI option for
-the explicit IANA timezone.
+The command imports `.fit` files, recursively imports `.fit` files from
+directories, and discovers `.fit` files inside Garmin account-export zip files,
+including nested uploaded-files zips. It retains raw imported activity FIT bytes
+under the configured raw artifact directory and stores only local SQLite lineage
+to those artifacts. Non-activity FIT files in Garmin export zips are skipped
+without raw retention. FIT timestamps are normalized to UTC; record metadata
+uses `TRAININGOS_LOCAL_TIMEZONE` or the `--timezone` CLI option for the explicit
+IANA timezone.
 
 Garmin ingestion is represented by an adapter over an injected client protocol.
 Concrete live clients must keep credentials in local configuration or secret

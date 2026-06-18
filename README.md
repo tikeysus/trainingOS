@@ -52,8 +52,8 @@ PYTHONPATH=src python3 -m trainingos.coach_web
 The dashboard includes an `Ask Local Coach` link to the default UI at
 `http://localhost:8765`.
 
-Import local FIT files with:
+Import local FIT files, directories, or Garmin export zips with:
 
 ```sh
-PYTHONPATH=src python3 -m trainingos.ingestion.fit_import /path/to/export
+PYTHONPATH=src python3 -m trainingos.ingestion.fit_import /path/to/file-dir-or-export.zip
 ```

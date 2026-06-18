@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import sqlite3
+import tempfile
+import zipfile
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -40,6 +43,8 @@ class FitMessage:
 @dataclass(frozen=True, slots=True)
 class FitImportPayload:
     path: Path
+    source_path: str | None = None
+    skip_missing_session: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,21 +60,30 @@ class ManualFitAdapter:
     source = MANUAL_FIT_SOURCE
 
     def __init__(self, paths: Iterable[Path]) -> None:
-        files = []
-        for path in paths:
+        self._temporary_directory: tempfile.TemporaryDirectory[str] | None = None
+        files: list[FitImportPayload] = []
+        for source_index, path in enumerate(paths, start=1):
             resolved = path.expanduser().absolute()
             if resolved.is_dir():
                 files.extend(
-                    sorted(
+                    FitImportPayload(path=candidate, source_path=str(candidate))
+                    for candidate in sorted(
                         candidate
                         for candidate in resolved.rglob("*")
-                        if candidate.is_file()
-                        and candidate.suffix.lower() == ".fit"
+                        if candidate.is_file() and candidate.suffix.lower() == ".fit"
+                    )
+                )
+            elif resolved.suffix.lower() == ".zip":
+                files.extend(
+                    _extract_zip_fit_payloads(
+                        resolved,
+                        self._temporary_root(),
+                        source_index,
                     )
                 )
             else:
-                files.append(resolved)
-        self._paths = tuple(dict.fromkeys(files))
+                files.append(FitImportPayload(path=resolved, source_path=str(resolved)))
+        self._payloads = tuple(_deduplicate_payloads(files))
 
     def fetch(
         self,
@@ -78,19 +92,32 @@ class ManualFitAdapter:
     ) -> SyncPage[FitImportPayload]:
         previous = 0 if cursor is None else int(cursor)
         records = []
-        for index, path in enumerate(self._paths, start=1):
+        for index, payload in enumerate(self._payloads, start=1):
             cursor_after = str(max(previous, index))
             records.append(
                 SyncRecord(
-                    external_id=str(path),
+                    external_id=payload.source_path or str(payload.path),
                     cursor_after=cursor_after,
-                    payload=FitImportPayload(path=path),
+                    payload=payload,
                 )
             )
         return SyncPage(records=tuple(records), done=True)
 
     def cursor_is_at_or_after(self, previous: str, candidate: str) -> bool:
         return int(candidate) >= int(previous)
+
+    def close(self) -> None:
+        if self._temporary_directory is not None:
+            self._temporary_directory.cleanup()
+            self._temporary_directory = None
+
+    def __del__(self) -> None:
+        self.close()
+
+    def _temporary_root(self) -> Path:
+        if self._temporary_directory is None:
+            self._temporary_directory = tempfile.TemporaryDirectory()
+        return Path(self._temporary_directory.name)
 
 
 class ManualFitHandler:
@@ -118,14 +145,19 @@ class ManualFitHandler:
 
         synced_at = _ensure_aware(self._clock(), "clock")
         messages = read_fit_messages(path)
-        parsed_for_identity = parse_fit_messages(
-            messages,
-            raw_record_id="raw:pending",
-            source=MANUAL_FIT_SOURCE,
-            fallback_external_id=_checksum_external_id(content),
-            synced_at=synced_at,
-            timezone=self._timezone,
-        )
+        try:
+            parsed_for_identity = parse_fit_messages(
+                messages,
+                raw_record_id="raw:pending",
+                source=MANUAL_FIT_SOURCE,
+                fallback_external_id=_checksum_external_id(content),
+                synced_at=synced_at,
+                timezone=self._timezone,
+            )
+        except SyncError as error:
+            if record.payload.skip_missing_session and error.code == "fit_session_missing":
+                return SyncDisposition.SKIPPED
+            raise
         sync_run_id = _current_sync_run_id(connection, MANUAL_FIT_SOURCE)
         raw = self._raw_store.retain_bytes(
             connection,
@@ -187,6 +219,82 @@ def read_fit_messages(path: Path) -> tuple[FitMessage, ...]:
     except Exception as error:
         raise SyncError("fit_parse_failed", "FIT file could not be parsed") from error
     return tuple(messages)
+
+
+def _extract_zip_fit_payloads(
+    archive_path: Path,
+    target_root: Path,
+    source_index: int,
+) -> tuple[FitImportPayload, ...]:
+    extracted: list[FitImportPayload] = []
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            _extract_fit_members(
+                archive,
+                target_root,
+                source_index,
+                extracted,
+            )
+    except (OSError, zipfile.BadZipFile) as error:
+        raise SyncError("fit_zip_unreadable", "FIT zip archive could not be read") from error
+    return tuple(extracted)
+
+
+def _extract_fit_members(
+    archive: zipfile.ZipFile,
+    target_root: Path,
+    source_index: int,
+    extracted: list[FitImportPayload],
+) -> None:
+    for member in sorted(archive.infolist(), key=lambda info: info.filename):
+        if member.is_dir():
+            continue
+        lower_name = member.filename.lower()
+        try:
+            content = archive.read(member)
+        except (OSError, zipfile.BadZipFile) as error:
+            raise SyncError(
+                "fit_zip_member_unreadable",
+                "FIT zip archive member could not be read",
+            ) from error
+        if lower_name.endswith(".fit"):
+            digest = hashlib.sha256(content).hexdigest()
+            sequence = len(extracted) + 1
+            extracted_path = target_root / f"fit-{sequence:06d}-{digest[:16]}.fit"
+            extracted_path.write_bytes(content)
+            extracted.append(
+                FitImportPayload(
+                    path=extracted_path,
+                    source_path=(
+                        f"zip-fit:{source_index}:{sequence}:sha256:{digest[:16]}"
+                    ),
+                    skip_missing_session=True,
+                )
+            )
+            continue
+        if lower_name.endswith(".zip"):
+            try:
+                with zipfile.ZipFile(io.BytesIO(content)) as nested_archive:
+                    _extract_fit_members(
+                        nested_archive,
+                        target_root,
+                        source_index,
+                        extracted,
+                    )
+            except zipfile.BadZipFile as error:
+                raise SyncError(
+                    "fit_nested_zip_unreadable",
+                    "nested FIT zip archive could not be read",
+                ) from error
+
+
+def _deduplicate_payloads(
+    payloads: Iterable[FitImportPayload],
+) -> tuple[FitImportPayload, ...]:
+    deduplicated: dict[str, FitImportPayload] = {}
+    for payload in payloads:
+        deduplicated.setdefault(payload.source_path or str(payload.path), payload)
+    return tuple(deduplicated.values())
 
 
 def parse_fit_messages(
@@ -287,7 +395,7 @@ def _lap(
     duration = _number(message, "total_timer_time", "total_elapsed_time")
     if started_at is None or duration is None:
         raise SyncError("fit_lap_invalid", "FIT lap is missing start or duration")
-    updated_at = _datetime(message, "timestamp") or started_at
+    updated_at = _not_before(_datetime(message, "timestamp") or started_at, started_at)
     lap_external_id = f"{external_id}:lap:{index}"
     return Lap(
         metadata=RecordMetadata(
@@ -357,6 +465,12 @@ def _sample_metrics(message: FitMessage) -> list[MetricValue]:
             continue
         metrics.append(MetricValue(key, Measurement(value, unit), quality=1.0))
     return metrics
+
+
+def _not_before(value: datetime, floor: datetime) -> datetime:
+    if value < floor:
+        return floor
+    return value
 
 
 def _reference(
