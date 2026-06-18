@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
         "paths",
         nargs="+",
         type=Path,
-        help="FIT file or directory paths to import",
+        help="FIT file, directory, or Garmin export zip paths to import",
     )
     parser.add_argument(
         "--timezone",
