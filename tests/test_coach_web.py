@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import threading
+import unittest
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from trainingos.coach_web import create_server
+from trainingos.providers import FakeChatProvider
+from trainingos.storage import apply_migrations, connect_database
+
+
+class CoachWebTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.database_path = Path(self.temporary_directory.name) / "training.sqlite3"
+        with connect_database(self.database_path) as connection:
+            apply_migrations(connection)
+            self._insert_document(connection)
+        self.provider = FakeChatProvider("Local coach answer from API.")
+        self.server = create_server(
+            host="127.0.0.1",
+            port=0,
+            database_path=self.database_path,
+            provider=self.provider,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        host, port = self.server.server_address
+        self.base_url = f"http://{host}:{port}"
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.thread.join(timeout=5)
+        self.server.server_close()
+        self.temporary_directory.cleanup()
+
+    def test_serves_chat_page(self) -> None:
+        with urllib.request.urlopen(f"{self.base_url}/") as response:
+            body = response.read().decode("utf-8")
+
+        self.assertEqual(200, response.status)
+        self.assertIn("TrainingOS Local Coach", body)
+        self.assertIn("/api/coach", body)
+
+    def test_api_returns_serialized_coach_answer(self) -> None:
+        payload = self._post_json(
+            "/api/coach",
+            {"question": "How was my weekly distance?", "evidence_limit": 1},
+        )
+
+        self.assertEqual("Local coach answer from API.", payload["answer"])
+        self.assertEqual({"week": 1}, payload["evidence_counts"])
+        self.assertEqual("doc-week-1", payload["evidence"][0]["document_id"])
+        self.assertEqual("fake", payload["provider_metadata"]["provider"])
+        self.assertEqual(1, len(self.provider.requests))
+
+    def test_api_validates_question_and_evidence_limit(self) -> None:
+        blank = self._post_json_error("/api/coach", {"question": " "})
+        limit = self._post_json_error(
+            "/api/coach",
+            {"question": "weekly distance", "evidence_limit": 0},
+        )
+
+        self.assertIn("question must be a non-blank string", blank["error"])
+        self.assertIn("evidence_limit must be a positive integer", limit["error"])
+
+    def test_api_rejects_malformed_json(self) -> None:
+        request = urllib.request.Request(
+            f"{self.base_url}/api/coach",
+            data=b"not-json",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(request)
+
+        self.assertEqual(400, raised.exception.code)
+        payload = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertIn("valid JSON", payload["error"])
+
+    def test_api_web_question_does_not_call_provider(self) -> None:
+        payload = self._post_json(
+            "/api/coach",
+            {"question": "What are the latest online taper articles?"},
+        )
+
+        self.assertIn("only use local TrainingOS evidence", payload["answer"])
+        self.assertEqual([], self.provider.requests)
+
+    def _post_json(self, path: str, payload: dict[str, object]) -> dict[str, object]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _post_json_error(
+        self,
+        path: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(request)
+        self.assertEqual(400, raised.exception.code)
+        return json.loads(raised.exception.read().decode("utf-8"))
+
+    def _insert_document(self, connection) -> None:
+        connection.execute(
+            """
+            INSERT INTO records (
+                record_id, record_type, timezone, created_at, updated_at,
+                provenance_kind, method_name, method_version
+            )
+            VALUES ('week-1', 'week', 'America/Toronto',
+                    '2026-11-09T12:00:00+00:00',
+                    '2026-11-09T12:00:00+00:00',
+                    'computed', 'test_fixture', '1.0.0')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO retrieval_documents (
+                document_id, document_type, source_record_id, source_updated_at,
+                title, body, metadata_json, evidence_json, caveats_json,
+                document_version, generated_at, stale_reason
+            )
+            VALUES ('doc-week-1', 'week', 'week-1',
+                    '2026-11-09T12:00:00+00:00',
+                    'Week 2026-11-02',
+                    'Weekly distance evidence: 64 km.',
+                    '{}', '["week-1"]', '[]',
+                    '1.0.0', '2026-11-09T12:00:00+00:00', NULL)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO retrieval_document_fts (document_id, title, body)
+            VALUES ('doc-week-1', 'Week 2026-11-02',
+                    'Weekly distance evidence: 64 km.')
+            """
+        )
+        connection.commit()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_PATH = ROOT / "grafana/dashboards/trainingos-local-dashboard.json"
 DATASOURCE_PATH = ROOT / "grafana/provisioning/datasources/trainingos-sqlite.yml"
 COMPOSE_PATH = ROOT / "docker-compose.yml"
+GRAFANA_RUNNER_PATH = ROOT / "scripts/run-grafana.sh"
 
 
 class DashboardReportingTests(unittest.TestCase):
@@ -433,12 +434,26 @@ class GrafanaDashboardDefinitionTests(unittest.TestCase):
     def test_provisioning_files_are_local_and_reproducible(self) -> None:
         datasource = DATASOURCE_PATH.read_text(encoding="utf-8")
         compose = COMPOSE_PATH.read_text(encoding="utf-8")
+        runner = GRAFANA_RUNNER_PATH.read_text(encoding="utf-8")
 
         self.assertIn("uid: trainingos-sqlite", datasource)
         self.assertIn("type: frser-sqlite-datasource", datasource)
         self.assertIn("path: /var/lib/trainingos/trainingos.sqlite3", datasource)
         self.assertIn("GF_INSTALL_PLUGINS: frser-sqlite-datasource", compose)
+        self.assertIn("TRAININGOS_GRAFANA_PROVISIONING_DIR", compose)
+        self.assertIn("TRAININGOS_GRAFANA_DASHBOARDS_DIR", compose)
+        self.assertIn("TRAININGOS_GRAFANA_DB_PATH", compose)
         self.assertIn("/var/lib/trainingos/trainingos.sqlite3:ro", compose)
+        self.assertIn("/private/tmp/trainingos-grafana-runtime", runner)
+        self.assertIn("TRAININGOS_GRAFANA_PROVISIONING_DIR", runner)
+        self.assertIn("TRAININGOS_GRAFANA_DASHBOARDS_DIR", runner)
+        self.assertIn("TRAININGOS_GRAFANA_DB_PATH", runner)
+        self.assertIn("TRAININGOS_GRAFANA_DETACH", runner)
+        self.assertIn("docker compose up --force-recreate", runner)
+        self.assertIn("docker-compose up --force-recreate", runner)
+        self.assertIn("docker run --rm", runner)
+        self.assertIn("GF_INSTALL_PLUGINS=frser-sqlite-datasource", runner)
+        self.assertIn("/var/lib/trainingos/trainingos.sqlite3:ro", runner)
         self.assertNotIn("password:", datasource.lower())
 
 

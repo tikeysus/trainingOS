@@ -1,6 +1,6 @@
 """SQLite persistence and schema migration support."""
 
-from .database import connect_database
+from .database import DatabaseConnectionError, connect_database
 from .migrations import (
     AppliedMigration,
     Migration,
@@ -11,6 +11,7 @@ from .migrations import (
 
 __all__ = [
     "AppliedMigration",
+    "DatabaseConnectionError",
     "Migration",
     "MigrationError",
     "apply_migrations",

@@ -56,3 +56,11 @@ dry-run, and local scheduling behavior.
 - Expensive analytics are computed during sync and persisted.
 - Queries for stored facts remain local and do not require a source or model
   provider.
+
+## Local coach boundary
+
+The coach retrieves compact local evidence documents from SQLite before calling
+a provider. The first real provider is local Ollama behind provider-neutral chat
+and embedding interfaces. Cloud providers and internet-aware research are not
+part of the default coach path; online evidence must be added later as an
+explicit source-ingestion boundary before it can be cited by coach answers.

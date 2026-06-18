@@ -4,8 +4,10 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from trainingos.storage import (
+    DatabaseConnectionError,
     Migration,
     MigrationError,
     apply_migrations,
@@ -38,6 +40,14 @@ class StorageTests(unittest.TestCase):
             5000,
             self.connection.execute("PRAGMA busy_timeout").fetchone()[0],
         )
+
+    def test_connection_wraps_unusable_database_path(self) -> None:
+        with patch("pathlib.Path.mkdir", side_effect=OSError("read-only filesystem")):
+            with self.assertRaisesRegex(
+                DatabaseConnectionError,
+                "cannot open local SQLite database",
+            ):
+                connect_database(Path("/absolute/path/to/trainingos.sqlite3"))
 
     def test_clean_database_applies_ordered_schema(self) -> None:
         applied = apply_migrations(self.connection)

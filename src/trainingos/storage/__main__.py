@@ -7,7 +7,7 @@ from pathlib import Path
 
 from trainingos.config import AppConfig
 
-from .database import connect_database
+from .database import DatabaseConnectionError, connect_database
 from .migrations import apply_migrations
 
 
@@ -20,9 +20,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    path = args.database or AppConfig.from_env().database_path
-    with connect_database(path) as connection:
-        applied = apply_migrations(connection)
+    try:
+        path = args.database or AppConfig.from_env().database_path
+        with connect_database(path) as connection:
+            applied = apply_migrations(connection)
+    except (DatabaseConnectionError, ValueError) as error:
+        parser.exit(2, f"{parser.prog}: error: {error}\n")
     print(f"Database ready at {path.expanduser().absolute()} ({len(applied)} migrations)")
 
 

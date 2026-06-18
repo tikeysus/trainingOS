@@ -6,13 +6,33 @@ from dataclasses import dataclass
 from os import environ
 from pathlib import Path
 from typing import Mapping
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+AI_PROVIDER_ENV = "TRAININGOS_AI_PROVIDER"
+AI_TIMEOUT_SECONDS_ENV = "TRAININGOS_AI_TIMEOUT_SECONDS"
+COACH_HOST_ENV = "TRAININGOS_COACH_HOST"
+COACH_PORT_ENV = "TRAININGOS_COACH_PORT"
 DATABASE_PATH_ENV = "TRAININGOS_DB_PATH"
 LOCAL_TIMEZONE_ENV = "TRAININGOS_LOCAL_TIMEZONE"
+OLLAMA_BASE_URL_ENV = "TRAININGOS_OLLAMA_BASE_URL"
+OLLAMA_CHAT_MODEL_ENV = "TRAININGOS_OLLAMA_CHAT_MODEL"
+OLLAMA_EMBEDDING_MODEL_ENV = "TRAININGOS_OLLAMA_EMBEDDING_MODEL"
 RAW_DATA_DIR_ENV = "TRAININGOS_RAW_DATA_DIR"
 DEFAULT_DATABASE_PATH = Path(".local/share/trainingos/trainingos.sqlite3")
 DEFAULT_RAW_DATA_DIR = Path(".local/share/trainingos/raw")
+DEFAULT_AI_PROVIDER = "ollama"
+DEFAULT_AI_TIMEOUT_SECONDS = 30.0
+DEFAULT_COACH_HOST = "127.0.0.1"
+DEFAULT_COACH_PORT = 8765
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_CHAT_MODEL = "llama3.2"
+DEFAULT_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
+LOCAL_OLLAMA_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+PLACEHOLDER_PATH_PREFIXES = (
+    "/absolute/path",
+    "/path/to",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,17 +40,28 @@ class AppConfig:
     database_path: Path
     raw_data_dir: Path
     local_timezone: str
+    ai_provider: str = DEFAULT_AI_PROVIDER
+    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+    ollama_chat_model: str = DEFAULT_OLLAMA_CHAT_MODEL
+    ollama_embedding_model: str = DEFAULT_OLLAMA_EMBEDDING_MODEL
+    ai_timeout_seconds: float = DEFAULT_AI_TIMEOUT_SECONDS
+    coach_host: str = DEFAULT_COACH_HOST
+    coach_port: int = DEFAULT_COACH_PORT
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> AppConfig:
         values = environ if env is None else env
         configured_path = values.get(DATABASE_PATH_ENV)
+        if configured_path:
+            _validate_configured_path(DATABASE_PATH_ENV, configured_path)
         database_path = (
             Path(configured_path)
             if configured_path
             else Path.home() / DEFAULT_DATABASE_PATH
         )
         configured_raw_dir = values.get(RAW_DATA_DIR_ENV)
+        if configured_raw_dir:
+            _validate_configured_path(RAW_DATA_DIR_ENV, configured_raw_dir)
         raw_data_dir = (
             Path(configured_raw_dir)
             if configured_raw_dir
@@ -38,10 +69,53 @@ class AppConfig:
         )
         local_timezone = values.get(LOCAL_TIMEZONE_ENV, "UTC")
         _validate_timezone(local_timezone)
+        ai_provider = values.get(AI_PROVIDER_ENV, DEFAULT_AI_PROVIDER).strip()
+        if ai_provider != DEFAULT_AI_PROVIDER:
+            raise ValueError("AI provider must be 'ollama' for local-only coaching")
+        ollama_base_url = values.get(OLLAMA_BASE_URL_ENV, DEFAULT_OLLAMA_BASE_URL)
+        _validate_local_ollama_url(ollama_base_url)
+        ollama_chat_model = _configured_text(
+            values,
+            OLLAMA_CHAT_MODEL_ENV,
+            DEFAULT_OLLAMA_CHAT_MODEL,
+        )
+        ollama_embedding_model = _configured_text(
+            values,
+            OLLAMA_EMBEDDING_MODEL_ENV,
+            DEFAULT_OLLAMA_EMBEDDING_MODEL,
+        )
+        ai_timeout_seconds = _configured_timeout(
+            values,
+            AI_TIMEOUT_SECONDS_ENV,
+            DEFAULT_AI_TIMEOUT_SECONDS,
+        )
+        coach_host = _configured_text(values, COACH_HOST_ENV, DEFAULT_COACH_HOST)
+        coach_port = _configured_port(values, COACH_PORT_ENV, DEFAULT_COACH_PORT)
         return cls(
             database_path=database_path.expanduser().absolute(),
             raw_data_dir=raw_data_dir.expanduser().absolute(),
             local_timezone=local_timezone,
+            ai_provider=ai_provider,
+            ollama_base_url=ollama_base_url.rstrip("/"),
+            ollama_chat_model=ollama_chat_model,
+            ollama_embedding_model=ollama_embedding_model,
+            ai_timeout_seconds=ai_timeout_seconds,
+            coach_host=coach_host,
+            coach_port=coach_port,
+        )
+
+
+def _validate_configured_path(name: str, value: str) -> None:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{name} must not be blank")
+    if any(
+        normalized == prefix or normalized.startswith(f"{prefix}/")
+        for prefix in PLACEHOLDER_PATH_PREFIXES
+    ):
+        raise ValueError(
+            f"{name} is set to documentation placeholder {value!r}; "
+            "set it to a real local path or unset it to use the default"
         )
 
 
@@ -54,3 +128,62 @@ def _validate_timezone(value: str) -> None:
         raise ValueError(f"local timezone must be a valid IANA timezone: {value}") from error
     if zone.key != value:
         raise ValueError(f"local timezone must use its canonical IANA key: {value}")
+
+
+def _configured_text(
+    values: Mapping[str, str],
+    name: str,
+    default: str,
+) -> str:
+    value = values.get(name, default)
+    if not value or not value.strip():
+        raise ValueError(f"{name} must not be blank")
+    return value.strip()
+
+
+def _configured_timeout(
+    values: Mapping[str, str],
+    name: str,
+    default: float,
+) -> float:
+    configured = values.get(name)
+    if configured is None:
+        return default
+    try:
+        timeout = float(configured)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a positive number") from error
+    if timeout <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    return timeout
+
+
+def _configured_port(
+    values: Mapping[str, str],
+    name: str,
+    default: int,
+) -> int:
+    configured = values.get(name)
+    if configured is None:
+        return default
+    try:
+        port = int(configured)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer port") from error
+    if port <= 0 or port > 65535:
+        raise ValueError(f"{name} must be between 1 and 65535")
+    return port
+
+
+def _validate_local_ollama_url(value: str) -> None:
+    if not value or not value.strip():
+        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must not be blank")
+    parsed = urlparse(value)
+    if parsed.scheme != "http":
+        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must use local http")
+    if parsed.hostname not in LOCAL_OLLAMA_HOSTS:
+        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must point to a local Ollama host")
+    if parsed.username or parsed.password:
+        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must not include credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must not include query or fragment")
