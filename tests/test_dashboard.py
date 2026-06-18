@@ -131,6 +131,28 @@ class DashboardReportingTests(unittest.TestCase):
         finally:
             empty.close()
 
+    def test_dashboard_queries_execute_against_seeded_and_empty_database(self) -> None:
+        dashboard = json.loads(DASHBOARD_PATH.read_text(encoding="utf-8"))
+        queries = _dashboard_queries(dashboard)
+
+        self.assertTrue(queries)
+        for query in queries:
+            with self.subTest(database="seeded", query=query):
+                cursor = self.connection.execute(query)
+                self.assertIsNotNone(cursor.description)
+                cursor.fetchall()
+
+        empty = connect_database(Path(self.temporary_directory.name) / "query-empty.sqlite3")
+        try:
+            apply_migrations(empty)
+            for query in queries:
+                with self.subTest(database="empty", query=query):
+                    cursor = empty.execute(query)
+                    self.assertIsNotNone(cursor.description)
+                    cursor.fetchall()
+        finally:
+            empty.close()
+
     def _seed_dashboard_data(self) -> None:
         self._record("activity-current-1", "activity", "user_entered")
         self.connection.execute(
