@@ -22,7 +22,20 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Ask Local Coach",
+      "tooltip": "Open the local TrainingOS coach chat UI",
+      "type": "link",
+      "url": "http://localhost:8765"
+    }
+  ],
   "liveNow": false,
   "panels": [
     {
