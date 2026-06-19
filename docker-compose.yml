@@ -8,6 +8,7 @@ services:
       GF_SECURITY_ADMIN_USER: "${TRAININGOS_GRAFANA_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${TRAININGOS_GRAFANA_ADMIN_PASSWORD:-admin}"
       GF_USERS_DEFAULT_THEME: light
+      GF_PANELS_DISABLE_SANITIZE_HTML: "true"
     volumes:
       - ${TRAININGOS_GRAFANA_PROVISIONING_DIR:-./grafana/provisioning}:/etc/grafana/provisioning:ro
       - ${TRAININGOS_GRAFANA_DASHBOARDS_DIR:-./grafana/dashboards}:/var/lib/grafana/dashboards:ro

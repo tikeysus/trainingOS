@@ -9,6 +9,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from trainingos.config import AppConfig
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
@@ -35,10 +36,12 @@ def create_server(
 ) -> HTTPServer:
     class TrainingOSCoachHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path not in {"/", "/index.html"}:
+            parsed = urlparse(self.path)
+            if parsed.path not in {"/", "/index.html"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
-            body = _chat_page().encode("utf-8")
+            embedded = parse_qs(parsed.query).get("embed") == ["1"]
+            body = _chat_page(embedded=embedded).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -152,7 +155,9 @@ def _optional_evidence_limit(value: object) -> int | None:
     return value
 
 
-def _chat_page() -> str:
+def _chat_page(*, embedded: bool = False) -> str:
+    body_class = ' class="embedded"' if embedded else ""
+    heading = "" if embedded else "    <h1>TrainingOS Local Coach</h1>\n"
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -175,6 +180,10 @@ def _chat_page() -> str:
       margin: 0 auto;
       padding: 28px 20px 40px;
     }
+    body.embedded main {
+      max-width: none;
+      padding: 12px;
+    }
     h1 {
       font-size: 28px;
       margin: 0 0 16px;
@@ -193,6 +202,9 @@ def _chat_page() -> str:
       padding: 12px;
       font: inherit;
       background: #fff;
+    }
+    body.embedded textarea {
+      min-height: 88px;
     }
     button {
       width: fit-content;
@@ -231,9 +243,9 @@ def _chat_page() -> str:
     }
   </style>
 </head>
-<body>
+<body__BODY_CLASS__>
   <main>
-    <h1>TrainingOS Local Coach</h1>
+__HEADING__
     <form id="coach-form">
       <textarea id="question" name="question" required
         placeholder="Ask about race readiness, recent training, recovery, or a block comparison."></textarea>
@@ -291,7 +303,7 @@ def _chat_page() -> str:
   </script>
 </body>
 </html>
-"""
+""".replace("__BODY_CLASS__", body_class).replace("__HEADING__", heading.rstrip())
 
 
 if __name__ == "__main__":
