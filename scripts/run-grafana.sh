@@ -65,6 +65,7 @@ exec docker run --rm \
     --env GF_SECURITY_ADMIN_USER="$admin_user" \
     --env GF_SECURITY_ADMIN_PASSWORD="$admin_password" \
     --env GF_USERS_DEFAULT_THEME=light \
+    --env GF_PANELS_DISABLE_SANITIZE_HTML=true \
     --volume "$provisioning_dir:/etc/grafana/provisioning:ro" \
     --volume "$dashboards_dir:/var/lib/grafana/dashboards:ro" \
     --volume "$runtime_database_path:/var/lib/trainingos/trainingos.sqlite3:ro" \
