@@ -46,6 +46,16 @@ class CoachWebTests(unittest.TestCase):
         self.assertIn("TrainingOS Local Coach", body)
         self.assertIn("/api/coach", body)
 
+    def test_serves_embedded_chat_page(self) -> None:
+        with urllib.request.urlopen(f"{self.base_url}/?embed=1") as response:
+            body = response.read().decode("utf-8")
+
+        self.assertEqual(200, response.status)
+        self.assertIn('body class="embedded"', body)
+        self.assertIn("/api/coach", body)
+        self.assertIn('textarea id="question"', body)
+        self.assertNotIn("<h1>TrainingOS Local Coach</h1>", body)
+
     def test_api_returns_serialized_coach_answer(self) -> None:
         payload = self._post_json(
             "/api/coach",
