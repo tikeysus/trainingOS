@@ -38,16 +38,18 @@ read-only snapshot of the configured SQLite database into
 `/private/tmp/trainingos-grafana-runtime`. This avoids macOS container-runtime
 permission failures when the project lives under `~/Documents`.
 
-The dashboard includes an `Ask Local Coach` link to `http://localhost:8765`.
-Start the local coach UI separately with:
+The dashboard includes an `Ask Local Coach` tile and a link to
+`http://localhost:8765`. Start the local coach UI separately with:
 
 ```sh
 export TRAININGOS_DB_PATH="$PWD/var/trainingos.sqlite3"
 PYTHONPATH=src python3 -m trainingos.coach_web
 ```
 
-Grafana still does not call the AI provider. The linked coach UI owns the local
-Ollama request after it retrieves bounded evidence from SQLite.
+Grafana still does not call the AI provider. The embedded and linked coach UI
+own the local Ollama request after retrieving bounded evidence from SQLite. The
+launcher intentionally enables Grafana HTML iframe rendering for this local
+dashboard so the `http://localhost:8765/?embed=1` tile can render.
 
 Grafana listens on `http://localhost:3000` by default. Set
 `TRAININGOS_GRAFANA_PORT` to use a different host port.

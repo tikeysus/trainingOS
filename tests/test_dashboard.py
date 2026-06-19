@@ -408,7 +408,7 @@ class GrafanaDashboardDefinitionTests(unittest.TestCase):
         self.assertEqual("TrainingOS Local Dashboard", dashboard["title"])
         panel_ids = [panel["id"] for panel in dashboard["panels"]]
         self.assertEqual(len(panel_ids), len(set(panel_ids)))
-        self.assertGreaterEqual(len(panel_ids), 10)
+        self.assertGreaterEqual(len(panel_ids), 12)
 
         queries = _dashboard_queries(dashboard)
         self.assertTrue(queries)
@@ -440,8 +440,21 @@ class GrafanaDashboardDefinitionTests(unittest.TestCase):
             "Race Projection Evidence",
             "Missing Data and Caveats",
             "Evidence Documents",
+            "Ask Local Coach",
         ):
             self.assertIn(title, panels)
+
+        coach_panel = panels["Ask Local Coach"]
+        coach_content = coach_panel["options"]["content"]
+        self.assertEqual("text", coach_panel["type"])
+        self.assertEqual("html", coach_panel["options"]["mode"])
+        self.assertIn("http://localhost:8765/?embed=1", coach_content)
+        self.assertIn("<iframe", coach_content)
+        self.assertNotIn("openai", coach_content.lower())
+        self.assertNotIn("anthropic", coach_content.lower())
+        self.assertNotIn("ollama", coach_content.lower())
+        self.assertNotIn("garmin", coach_content.lower())
+        self.assertNotIn("strava", coach_content.lower())
 
         self.assertEqual("km", _unit(panels["Weekly Distance"]))
         self.assertEqual("km", _unit(panels["Long Run Progression"]))
@@ -462,6 +475,7 @@ class GrafanaDashboardDefinitionTests(unittest.TestCase):
         self.assertIn("type: frser-sqlite-datasource", datasource)
         self.assertIn("path: /var/lib/trainingos/trainingos.sqlite3", datasource)
         self.assertIn("GF_INSTALL_PLUGINS: frser-sqlite-datasource", compose)
+        self.assertIn('GF_PANELS_DISABLE_SANITIZE_HTML: "true"', compose)
         self.assertIn("TRAININGOS_GRAFANA_PROVISIONING_DIR", compose)
         self.assertIn("TRAININGOS_GRAFANA_DASHBOARDS_DIR", compose)
         self.assertIn("TRAININGOS_GRAFANA_DB_PATH", compose)
@@ -475,6 +489,7 @@ class GrafanaDashboardDefinitionTests(unittest.TestCase):
         self.assertIn("docker-compose up --force-recreate", runner)
         self.assertIn("docker run --rm", runner)
         self.assertIn("GF_INSTALL_PLUGINS=frser-sqlite-datasource", runner)
+        self.assertIn("GF_PANELS_DISABLE_SANITIZE_HTML=true", runner)
         self.assertIn("/var/lib/trainingos/trainingos.sqlite3:ro", runner)
         self.assertNotIn("password:", datasource.lower())
 
