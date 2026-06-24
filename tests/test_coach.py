@@ -7,12 +7,15 @@ from pathlib import Path
 
 from trainingos.presentation import CoachService
 from trainingos.providers import (
+    ChatMessage,
     ChatProvider,
     ChatRequest,
     ChatResponse,
     FakeChatProvider,
     ProviderError,
     ProviderErrorCategory,
+    ProviderMetadata,
+    ProviderUsage,
 )
 from trainingos.storage import apply_migrations, connect_database
 
@@ -192,6 +195,41 @@ class CoachServiceTests(unittest.TestCase):
         self.assertIn("local provider failure: provider_unavailable", answer.caveats)
         self.assertIsNone(answer.provider_metadata)
 
+    def test_anthropic_provider_injects_cloud_caveat(self) -> None:
+        self._insert_document(
+            document_id="doc-week-1",
+            document_type="week",
+            source_record_id="week-1",
+            title="Week 2026-11-02",
+            body="Week 2026-11-02 distance: 50 km.",
+        )
+        service = CoachService(self.connection, AnthropicFakeChatProvider())
+
+        answer = service.answer("How was my weekly distance?")
+
+        self.assertIn(
+            "training data was sent to Anthropic cloud for this answer",
+            answer.caveats,
+        )
+        self.assertEqual("anthropic", answer.provider_metadata.provider)
+
+    def test_ollama_provider_does_not_inject_cloud_caveat(self) -> None:
+        self._insert_document(
+            document_id="doc-week-1",
+            document_type="week",
+            source_record_id="week-1",
+            title="Week 2026-11-02",
+            body="Week 2026-11-02 distance: 50 km.",
+        )
+        service = CoachService(self.connection, FakeChatProvider("local answer"))
+
+        answer = service.answer("How was my weekly distance?")
+
+        self.assertNotIn(
+            "training data was sent to Anthropic cloud for this answer",
+            answer.caveats,
+        )
+
     def _insert_document(
         self,
         *,
@@ -263,6 +301,23 @@ def _json_array(values: tuple[str, ...]) -> str:
     import json
 
     return json.dumps(list(values))
+
+
+class AnthropicFakeChatProvider:
+    """Fake that returns metadata with provider='anthropic' for caveat injection tests."""
+
+    def __init__(self, response_text: str = "anthropic response") -> None:
+        self.response_text = response_text
+        self.requests: list[ChatRequest] = []
+
+    def complete(self, request: ChatRequest) -> ChatResponse:
+        self.requests.append(request)
+        return ChatResponse(
+            message=ChatMessage(role="assistant", content=self.response_text),
+            metadata=ProviderMetadata(provider="anthropic", model="claude-sonnet-4-6", latency_seconds=0.1),
+            usage=ProviderUsage(input_tokens=10, output_tokens=5),
+            finish_reason="end_turn",
+        )
 
 
 class TimeoutChatProvider(ChatProvider):

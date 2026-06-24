@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 AI_PROVIDER_ENV = "TRAININGOS_AI_PROVIDER"
 AI_TIMEOUT_SECONDS_ENV = "TRAININGOS_AI_TIMEOUT_SECONDS"
+ANTHROPIC_API_KEY_ENV = "TRAININGOS_ANTHROPIC_API_KEY"
+ANTHROPIC_CHAT_MODEL_ENV = "TRAININGOS_ANTHROPIC_CHAT_MODEL"
 COACH_HOST_ENV = "TRAININGOS_COACH_HOST"
 COACH_PORT_ENV = "TRAININGOS_COACH_PORT"
 DATABASE_PATH_ENV = "TRAININGOS_DB_PATH"
@@ -23,6 +25,7 @@ DEFAULT_DATABASE_PATH = Path(".local/share/trainingos/trainingos.sqlite3")
 DEFAULT_RAW_DATA_DIR = Path(".local/share/trainingos/raw")
 DEFAULT_AI_PROVIDER = "ollama"
 DEFAULT_AI_TIMEOUT_SECONDS = 30.0
+DEFAULT_ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-6"
 DEFAULT_COACH_HOST = "127.0.0.1"
 DEFAULT_COACH_PORT = 8765
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
@@ -45,6 +48,8 @@ class AppConfig:
     ollama_chat_model: str = DEFAULT_OLLAMA_CHAT_MODEL
     ollama_embedding_model: str = DEFAULT_OLLAMA_EMBEDDING_MODEL
     ai_timeout_seconds: float = DEFAULT_AI_TIMEOUT_SECONDS
+    anthropic_api_key: str | None = None
+    anthropic_chat_model: str | None = None
     coach_host: str = DEFAULT_COACH_HOST
     coach_port: int = DEFAULT_COACH_PORT
 
@@ -70,10 +75,27 @@ class AppConfig:
         local_timezone = values.get(LOCAL_TIMEZONE_ENV, "UTC")
         _validate_timezone(local_timezone)
         ai_provider = values.get(AI_PROVIDER_ENV, DEFAULT_AI_PROVIDER).strip()
-        if ai_provider != DEFAULT_AI_PROVIDER:
-            raise ValueError("AI provider must be 'ollama' for local-only coaching")
+        if ai_provider not in {"ollama", "anthropic"}:
+            raise ValueError(
+                f"TRAININGOS_AI_PROVIDER must be 'ollama' or 'anthropic', got {ai_provider!r}"
+            )
+        anthropic_api_key: str | None = None
+        anthropic_chat_model: str | None = None
+        if ai_provider == "anthropic":
+            raw_key = values.get(ANTHROPIC_API_KEY_ENV, "").strip()
+            if not raw_key:
+                raise ValueError(
+                    f"{ANTHROPIC_API_KEY_ENV} is required when TRAININGOS_AI_PROVIDER=anthropic"
+                )
+            anthropic_api_key = raw_key
+            anthropic_chat_model = _configured_text(
+                values,
+                ANTHROPIC_CHAT_MODEL_ENV,
+                DEFAULT_ANTHROPIC_CHAT_MODEL,
+            )
         ollama_base_url = values.get(OLLAMA_BASE_URL_ENV, DEFAULT_OLLAMA_BASE_URL)
-        _validate_local_ollama_url(ollama_base_url)
+        if ai_provider == "ollama":
+            _validate_local_ollama_url(ollama_base_url)
         ollama_chat_model = _configured_text(
             values,
             OLLAMA_CHAT_MODEL_ENV,
@@ -100,6 +122,8 @@ class AppConfig:
             ollama_chat_model=ollama_chat_model,
             ollama_embedding_model=ollama_embedding_model,
             ai_timeout_seconds=ai_timeout_seconds,
+            anthropic_api_key=anthropic_api_key,
+            anthropic_chat_model=anthropic_chat_model,
             coach_host=coach_host,
             coach_port=coach_port,
         )
