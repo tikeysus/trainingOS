@@ -10,11 +10,21 @@
         "hide": false,
         "iconColor": "rgba(31, 120, 193, 1)",
         "name": "Context, races, and blocks",
-        "rawSql": "SELECT occurred_at AS time, label || ': ' || text AS text, annotation_type AS tags FROM dashboard_context_annotations ORDER BY occurred_at",
         "target": {
-          "rawSql": "SELECT occurred_at AS time, label || ': ' || text AS text, annotation_type AS tags FROM dashboard_context_annotations ORDER BY occurred_at"
+          "rawQueryText": "SELECT CAST(strftime('%s', occurred_at) AS INTEGER) AS time, label || ': ' || text AS text, annotation_type AS tags FROM dashboard_context_annotations ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', occurred_at) AS INTEGER) AS time, label || ': ' || text AS text, annotation_type AS tags FROM dashboard_context_annotations ORDER BY time",
+          "queryType": "table",
+          "timeColumns": [
+            "time"
+          ]
         },
-        "type": "dashboard"
+        "type": "dashboard",
+        "rawQueryText": "SELECT CAST(strftime('%s', occurred_at) AS INTEGER) AS time, label || ': ' || text AS text, annotation_type AS tags FROM dashboard_context_annotations ORDER BY time",
+        "queryText": "SELECT CAST(strftime('%s', occurred_at) AS INTEGER) AS time, label || ': ' || text AS text, annotation_type AS tags FROM dashboard_context_annotations ORDER BY time",
+        "queryType": "table",
+        "timeColumns": [
+          "time"
+        ]
       }
     ]
   },
@@ -73,9 +83,13 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "time_series",
-          "rawSql": "SELECT week_start_date AS time, distance_kilometres AS weekly_distance_km FROM dashboard_weekly_training ORDER BY week_start_date",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT CAST(strftime('%s', week_start_date || 'T00:00:00Z') AS INTEGER) AS time, distance_kilometres AS weekly_distance_km FROM dashboard_weekly_training ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', week_start_date || 'T00:00:00Z') AS INTEGER) AS time, distance_kilometres AS weekly_distance_km FROM dashboard_weekly_training ORDER BY time",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
         }
       ],
       "title": "Weekly Distance",
@@ -116,9 +130,13 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "time_series",
-          "rawSql": "SELECT window_start AS time, metric_value AS training_load_ratio FROM dashboard_metric_timeseries WHERE metric_key = 'training_load_trend' ORDER BY window_start",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS training_load_ratio FROM dashboard_metric_timeseries WHERE metric_key = 'training_load_trend' ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS training_load_ratio FROM dashboard_metric_timeseries WHERE metric_key = 'training_load_trend' ORDER BY time",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
         }
       ],
       "title": "Training Load Trend",
@@ -159,9 +177,13 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "time_series",
-          "rawSql": "SELECT week_start_date AS time, long_run_kilometres AS long_run_km FROM dashboard_weekly_training ORDER BY week_start_date",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT CAST(strftime('%s', week_start_date || 'T00:00:00Z') AS INTEGER) AS time, long_run_kilometres AS long_run_km FROM dashboard_weekly_training ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', week_start_date || 'T00:00:00Z') AS INTEGER) AS time, long_run_kilometres AS long_run_km FROM dashboard_weekly_training ORDER BY time",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
         }
       ],
       "title": "Long Run Progression",
@@ -202,9 +224,13 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "time_series",
-          "rawSql": "SELECT window_start AS time, metric_value AS marathon_pace_metres FROM dashboard_metric_timeseries WHERE metric_key = 'marathon_pace_volume' ORDER BY window_start",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS marathon_pace_metres FROM dashboard_metric_timeseries WHERE metric_key = 'marathon_pace_volume' ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS marathon_pace_metres FROM dashboard_metric_timeseries WHERE metric_key = 'marathon_pace_volume' ORDER BY time",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
         }
       ],
       "title": "Marathon-Pace Volume",
@@ -245,9 +271,13 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "time_series",
-          "rawSql": "SELECT window_start AS time, metric_value AS aerobic_efficiency FROM dashboard_metric_timeseries WHERE metric_key = 'aerobic_efficiency' ORDER BY window_start",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS aerobic_efficiency FROM dashboard_metric_timeseries WHERE metric_key = 'aerobic_efficiency' ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS aerobic_efficiency FROM dashboard_metric_timeseries WHERE metric_key = 'aerobic_efficiency' ORDER BY time",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
         }
       ],
       "title": "Aerobic Efficiency",
@@ -288,9 +318,13 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "time_series",
-          "rawSql": "SELECT window_start AS time, metric_value AS heart_rate_drift_percent FROM dashboard_metric_timeseries WHERE metric_key = 'heart_rate_drift' ORDER BY window_start",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS heart_rate_drift_percent FROM dashboard_metric_timeseries WHERE metric_key = 'heart_rate_drift' ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS heart_rate_drift_percent FROM dashboard_metric_timeseries WHERE metric_key = 'heart_rate_drift' ORDER BY time",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
         }
       ],
       "title": "Heart-Rate Drift",
@@ -331,9 +365,13 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "time_series",
-          "rawSql": "SELECT window_start AS time, metric_value AS recovery_coverage FROM dashboard_metric_timeseries WHERE metric_key = 'recovery_coverage' ORDER BY window_start",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS recovery_coverage FROM dashboard_metric_timeseries WHERE metric_key = 'recovery_coverage' ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', window_start) AS INTEGER) AS time, metric_value AS recovery_coverage FROM dashboard_metric_timeseries WHERE metric_key = 'recovery_coverage' ORDER BY time",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
         }
       ],
       "title": "Recovery Coverage",
@@ -366,9 +404,11 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "table",
-          "rawSql": "SELECT current_block_name, current_distance_kilometres, current_run_count, previous_block_name, previous_distance_kilometres, previous_run_count, distance_delta_metres / 1000.0 AS distance_delta_km, run_count_delta, caveat FROM dashboard_block_comparison",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT current_block_name, current_distance_kilometres, current_run_count, previous_block_name, previous_distance_kilometres, previous_run_count, distance_delta_metres / 1000.0 AS distance_delta_km, run_count_delta, caveat FROM dashboard_block_comparison",
+          "queryText": "SELECT current_block_name, current_distance_kilometres, current_run_count, previous_block_name, previous_distance_kilometres, previous_run_count, distance_delta_metres / 1000.0 AS distance_delta_km, run_count_delta, caveat FROM dashboard_block_comparison",
+          "queryType": "table",
+          "timeColumns": []
         }
       ],
       "title": "Current vs Prior Block",
@@ -401,9 +441,11 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "table",
-          "rawSql": "SELECT race_name, started_at, target_duration_seconds, projection_status, projected_duration_seconds, uncertainty_seconds, caveat FROM dashboard_race_projection_status ORDER BY started_at",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT race_name, started_at, target_duration_seconds, projection_status, projected_duration_seconds, uncertainty_seconds, caveat FROM dashboard_race_projection_status ORDER BY started_at",
+          "queryText": "SELECT race_name, started_at, target_duration_seconds, projection_status, projected_duration_seconds, uncertainty_seconds, caveat FROM dashboard_race_projection_status ORDER BY started_at",
+          "queryType": "table",
+          "timeColumns": []
         }
       ],
       "title": "Race Projection Evidence",
@@ -436,9 +478,11 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "table",
-          "rawSql": "SELECT week_start_date, data_gaps_json, caveats FROM dashboard_weekly_training WHERE data_gaps_json != '[]' OR caveats IS NOT NULL ORDER BY week_start_date DESC LIMIT 20",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT week_start_date, data_gaps_json, caveats FROM dashboard_weekly_training WHERE data_gaps_json != '[]' OR caveats IS NOT NULL ORDER BY week_start_date DESC LIMIT 20",
+          "queryText": "SELECT week_start_date, data_gaps_json, caveats FROM dashboard_weekly_training WHERE data_gaps_json != '[]' OR caveats IS NOT NULL ORDER BY week_start_date DESC LIMIT 20",
+          "queryType": "table",
+          "timeColumns": []
         }
       ],
       "title": "Missing Data and Caveats",
@@ -471,9 +515,11 @@
             "type": "frser-sqlite-datasource",
             "uid": "trainingos-sqlite"
           },
-          "format": "table",
-          "rawSql": "SELECT document_type, title, source_record_id, evidence_json, caveats_json, stale_reason, generated_at FROM dashboard_evidence_documents ORDER BY generated_at DESC, document_type LIMIT 50",
-          "refId": "A"
+          "refId": "A",
+          "rawQueryText": "SELECT document_type, title, source_record_id, evidence_json, caveats_json, stale_reason, generated_at FROM dashboard_evidence_documents ORDER BY generated_at DESC, document_type LIMIT 50",
+          "queryText": "SELECT document_type, title, source_record_id, evidence_json, caveats_json, stale_reason, generated_at FROM dashboard_evidence_documents ORDER BY generated_at DESC, document_type LIMIT 50",
+          "queryType": "table",
+          "timeColumns": []
         }
       ],
       "title": "Evidence Documents",

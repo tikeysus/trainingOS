@@ -30,11 +30,19 @@ default IANA timezone for manual imports.
 Local coach synthesis defaults to Ollama at `http://localhost:11434`. Override
 `TRAININGOS_OLLAMA_CHAT_MODEL`, `TRAININGOS_OLLAMA_EMBEDDING_MODEL`, or
 `TRAININGOS_AI_TIMEOUT_SECONDS` to change local provider behavior.
+Start Ollama with `ollama serve` before asking coach questions, and install the
+configured chat model with `ollama pull llama3.2` if needed.
 
 Initialize or update the configured database with:
 
 ```sh
 PYTHONPATH=src python3 -m trainingos.storage
+```
+
+Refresh derived metrics and coach retrieval documents after imports with:
+
+```sh
+PYTHONPATH=src python3 -m trainingos.refresh
 ```
 
 Run the local Grafana dashboard with:
@@ -49,6 +57,12 @@ Run the local coach chat UI with:
 PYTHONPATH=src python3 -m trainingos.coach_web
 ```
 
+Check coach database/provider status with:
+
+```sh
+curl http://localhost:8765/api/health
+```
+
 The dashboard includes an `Ask Local Coach` link to the default UI at
 `http://localhost:8765`.
 
@@ -57,3 +71,6 @@ Import local FIT files, directories, or Garmin export zips with:
 ```sh
 PYTHONPATH=src python3 -m trainingos.ingestion.fit_import /path/to/file-dir-or-export.zip
 ```
+
+Successful manual FIT imports refresh derived metrics and retrieval documents
+for the same configured database.

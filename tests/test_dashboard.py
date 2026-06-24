@@ -154,6 +154,20 @@ class DashboardReportingTests(unittest.TestCase):
         finally:
             empty.close()
 
+    def test_timeseries_dashboard_queries_return_numeric_time_values(self) -> None:
+        dashboard = json.loads(DASHBOARD_PATH.read_text(encoding="utf-8"))
+        targets = _dashboard_targets(dashboard)
+
+        self.assertTrue(targets)
+        for target in targets:
+            if target["queryType"] != "time series":
+                continue
+            with self.subTest(query=target["rawQueryText"]):
+                rows = self.connection.execute(target["rawQueryText"]).fetchall()
+                if not rows:
+                    continue
+                self.assertIsInstance(rows[0]["time"], int)
+
     def _seed_dashboard_data(self) -> None:
         self._record("activity-current-1", "activity", "user_entered")
         self.connection.execute(
@@ -474,6 +488,8 @@ class GrafanaDashboardDefinitionTests(unittest.TestCase):
         self.assertIn("uid: trainingos-sqlite", datasource)
         self.assertIn("type: frser-sqlite-datasource", datasource)
         self.assertIn("path: /var/lib/trainingos/trainingos.sqlite3", datasource)
+        self.assertIn('pathPrefix: "file:"', datasource)
+        self.assertIn('pathOptions: "mode=ro&immutable=1&_pragma=query_only(1)"', datasource)
         self.assertIn("GF_INSTALL_PLUGINS: frser-sqlite-datasource", compose)
         self.assertIn('GF_PANELS_DISABLE_SANITIZE_HTML: "true"', compose)
         self.assertIn("TRAININGOS_GRAFANA_PROVISIONING_DIR", compose)
@@ -493,19 +509,45 @@ class GrafanaDashboardDefinitionTests(unittest.TestCase):
         self.assertIn("/var/lib/trainingos/trainingos.sqlite3:ro", runner)
         self.assertNotIn("password:", datasource.lower())
 
+    def test_dashboard_targets_use_sqlite_plugin_query_contract(self) -> None:
+        dashboard = json.loads(DASHBOARD_PATH.read_text(encoding="utf-8"))
+        targets = _dashboard_targets(dashboard)
+
+        self.assertTrue(targets)
+        self.assertNotIn("rawSql", json.dumps(dashboard))
+        for target in targets:
+            with self.subTest(target=target):
+                self.assertNotIn("format", target)
+                self.assertIn(target["queryType"], {"time series", "table"})
+                self.assertEqual(target["rawQueryText"], target["queryText"])
+                self.assertTrue(target["rawQueryText"].strip())
+                if target["queryType"] == "time series":
+                    self.assertEqual(["time"], target["timeColumns"])
+                    self.assertIn(" AS time", target["rawQueryText"])
+                else:
+                    self.assertIn("timeColumns", target)
+
 
 def _dashboard_queries(dashboard: dict[str, Any]) -> tuple[str, ...]:
     queries: list[str] = []
+    for target in _dashboard_targets(dashboard):
+        raw_query = target.get("rawQueryText")
+        if raw_query:
+            queries.append(raw_query)
+    return tuple(dict.fromkeys(queries))
+
+
+def _dashboard_targets(dashboard: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    targets: list[dict[str, Any]] = []
     for panel in dashboard["panels"]:
-        for target in panel.get("targets", []):
-            raw_sql = target.get("rawSql")
-            if raw_sql:
-                queries.append(raw_sql)
+        targets.extend(panel.get("targets", []))
     for annotation in dashboard["annotations"]["list"]:
-        raw_sql = annotation.get("rawSql")
-        if raw_sql:
-            queries.append(raw_sql)
-    return tuple(queries)
+        if annotation.get("rawQueryText"):
+            targets.append(annotation)
+        target = annotation.get("target")
+        if target and target.get("rawQueryText"):
+            targets.append(target)
+    return tuple(targets)
 
 
 def _datasource_uids(dashboard: dict[str, Any]) -> set[str]:

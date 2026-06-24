@@ -168,10 +168,28 @@ class CoachServiceTests(unittest.TestCase):
         answer = service.answer("Summarize my recent running.")
 
         self.assertIn("found local TrainingOS evidence", answer.answer)
-        self.assertIn("timeout", answer.answer)
+        self.assertIn("timed out", answer.answer)
         self.assertEqual(("doc-workout-1",), tuple(item.document_id for item in answer.evidence))
         self.assertEqual({"workout": 1}, answer.evidence_counts)
         self.assertIn("local provider failure: timeout", answer.caveats)
+        self.assertIsNone(answer.provider_metadata)
+
+    def test_provider_unavailable_tells_user_to_start_ollama(self) -> None:
+        self._insert_document(
+            document_id="doc-workout-1",
+            document_type="workout",
+            source_record_id="workout-1",
+            title="Workout 2026-11-02",
+            body="Workout workout-1 is a run on 2026-11-02. Distance: 12.0 km.",
+        )
+        service = CoachService(self.connection, UnavailableChatProvider())
+
+        answer = service.answer("Summarize my recent running.")
+
+        self.assertIn("found local TrainingOS evidence", answer.answer)
+        self.assertIn("Ollama is not reachable", answer.answer)
+        self.assertIn("ollama serve", answer.answer)
+        self.assertIn("local provider failure: provider_unavailable", answer.caveats)
         self.assertIsNone(answer.provider_metadata)
 
     def _insert_document(
@@ -252,6 +270,16 @@ class TimeoutChatProvider(ChatProvider):
         raise ProviderError(
             ProviderErrorCategory.TIMEOUT,
             "local Ollama request timed out",
+            provider="ollama",
+            retryable=True,
+        )
+
+
+class UnavailableChatProvider(ChatProvider):
+    def complete(self, request: ChatRequest) -> ChatResponse:
+        raise ProviderError(
+            ProviderErrorCategory.PROVIDER_UNAVAILABLE,
+            "local Ollama service is unavailable",
             provider="ollama",
             retryable=True,
         )

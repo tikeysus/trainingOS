@@ -12,6 +12,7 @@ from trainingos.providers import (
     ChatProvider,
     ChatRequest,
     ProviderError,
+    ProviderErrorCategory,
     ProviderMetadata,
 )
 from trainingos.retrieval import (
@@ -127,10 +128,8 @@ class CoachService:
             return CoachAnswer(
                 answer=(
                     "I found local TrainingOS evidence for this question, but the "
-                    f"{error.provider} provider could not complete the answer "
-                    f"because of a {error.category.value} error. Try again with a "
-                    "higher TRAININGOS_AI_TIMEOUT_SECONDS value, a smaller "
-                    "evidence_limit, or a smaller local model."
+                    f"{error.provider} provider could not complete the answer. "
+                    f"{_provider_recovery_guidance(error)}"
                 ),
                 evidence=_evidence_references(selection.results),
                 evidence_counts=_evidence_counts(selection.results),
@@ -300,6 +299,29 @@ def _answer_caveats(
     if _asks_health_question(question):
         caveats.append("health and injury guidance is informational, not medical diagnosis")
     return tuple(dict.fromkeys(caveats))
+
+
+def _provider_recovery_guidance(error: ProviderError) -> str:
+    if error.category is ProviderErrorCategory.PROVIDER_UNAVAILABLE:
+        return (
+            "Ollama is not reachable at the configured local endpoint. Start it "
+            "with `ollama serve`, confirm `ollama list` works, then retry."
+        )
+    if error.category is ProviderErrorCategory.TIMEOUT:
+        return (
+            "The local Ollama request timed out. Try a higher "
+            "TRAININGOS_AI_TIMEOUT_SECONDS value, a smaller evidence_limit, or a "
+            "smaller local model."
+        )
+    if error.category is ProviderErrorCategory.UNSUPPORTED_CAPABILITY:
+        return (
+            "The local Ollama request was rejected. Confirm the configured model "
+            "is installed with `ollama list` or set TRAININGOS_OLLAMA_CHAT_MODEL."
+        )
+    return (
+        f"It failed with a {error.category.value} error. Confirm Ollama is "
+        "running locally, the configured model is installed, and retry."
+    )
 
 
 def _asks_for_live_or_web_evidence(question: str) -> bool:
