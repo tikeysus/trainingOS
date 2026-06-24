@@ -8,12 +8,12 @@ from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from trainingos.config import AppConfig
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
-from trainingos.providers import ChatProvider, OllamaChatProvider
+from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, check_ollama_health
 from trainingos.storage import connect_database
 
 MAX_REQUEST_BYTES = 65536
@@ -33,10 +33,17 @@ def create_server(
     port: int,
     database_path: Path,
     provider: ChatProvider,
+    provider_health: Callable[[], OllamaHealth] | None = None,
 ) -> HTTPServer:
     class TrainingOSCoachHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/api/health":
+                try:
+                    self._send_json(HTTPStatus.OK, _health_payload(database_path, provider_health))
+                except Exception:
+                    self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"status": "error"})
+                return
             if parsed.path not in {"/", "/index.html"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
@@ -131,6 +138,11 @@ def main() -> None:
         port=port,
         database_path=database_path,
         provider=create_coach_provider(config),
+        provider_health=lambda: check_ollama_health(
+            base_url=config.ollama_base_url,
+            chat_model=config.ollama_chat_model,
+            timeout_seconds=min(config.ai_timeout_seconds, 5.0),
+        ),
     )
     try:
         print(f"TrainingOS coach UI listening at http://{host}:{port}")
@@ -153,6 +165,41 @@ def _optional_evidence_limit(value: object) -> int | None:
     if value <= 0:
         raise ValueError("evidence_limit must be a positive integer")
     return value
+
+
+def _health_payload(
+    database_path: Path,
+    provider_health: Callable[[], OllamaHealth] | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "database": {
+            "path": str(database_path.expanduser().absolute()),
+            "retrieval_documents": 0,
+        },
+        "provider": {"available": None},
+    }
+    with connect_database(database_path) as connection:
+        payload["database"]["retrieval_documents"] = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM retrieval_documents
+            WHERE stale_reason IS NULL
+            """
+        ).fetchone()[0]
+    if provider_health is not None:
+        health = provider_health()
+        payload["provider"] = {
+            "provider": "ollama",
+            "base_url": health.base_url,
+            "chat_model": health.chat_model,
+            "available": health.available,
+            "available_models": list(health.available_models),
+            "error": health.error,
+        }
+        if not health.available:
+            payload["status"] = "degraded"
+    return payload
 
 
 def _chat_page(*, embedded: bool = False) -> str:

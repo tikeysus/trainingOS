@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from trainingos.coach_web import create_server
-from trainingos.providers import FakeChatProvider
+from trainingos.providers import FakeChatProvider, OllamaHealth
 from trainingos.storage import apply_migrations, connect_database
 
 
@@ -26,6 +26,12 @@ class CoachWebTests(unittest.TestCase):
             port=0,
             database_path=self.database_path,
             provider=self.provider,
+            provider_health=lambda: OllamaHealth(
+                base_url="http://localhost:11434",
+                chat_model="llama3.2",
+                available=False,
+                error="local Ollama service is not reachable; start it with `ollama serve`",
+            ),
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -67,6 +73,17 @@ class CoachWebTests(unittest.TestCase):
         self.assertEqual("doc-week-1", payload["evidence"][0]["document_id"])
         self.assertEqual("fake", payload["provider_metadata"]["provider"])
         self.assertEqual(1, len(self.provider.requests))
+
+    def test_api_health_reports_database_and_provider_status(self) -> None:
+        with urllib.request.urlopen(f"{self.base_url}/api/health") as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("degraded", payload["status"])
+        self.assertEqual(1, payload["database"]["retrieval_documents"])
+        self.assertFalse(payload["provider"]["available"])
+        self.assertEqual("ollama", payload["provider"]["provider"])
+        self.assertIn("ollama serve", payload["provider"]["error"])
 
     def test_api_validates_question_and_evidence_limit(self) -> None:
         blank = self._post_json_error("/api/coach", {"question": " "})

@@ -17,6 +17,18 @@ PYTHONPATH=src python3 -m trainingos.storage
 Run ingestion and metric/retrieval generation before opening the dashboard.
 Expensive calculations are expected to be persisted before request time.
 
+For an existing populated database, refresh persisted dashboard and coach
+evidence with:
+
+```sh
+export TRAININGOS_DB_PATH="$PWD/var/trainingos.sqlite3"
+PYTHONPATH=src python3 -m trainingos.refresh
+```
+
+Restart Grafana after refreshing. The launcher copies the configured SQLite
+database into `/private/tmp/trainingos-grafana-runtime`, so a running Grafana
+container will keep reading the previous snapshot until it is recreated.
+
 ## Run Grafana
 
 The Grafana launcher provisions:
@@ -39,7 +51,8 @@ read-only snapshot of the configured SQLite database into
 permission failures when the project lives under `~/Documents`.
 
 The dashboard includes an `Ask Local Coach` tile and a link to
-`http://localhost:8765`. Start the local coach UI separately with:
+`http://localhost:8765`. Start the local coach UI separately with the same
+database path:
 
 ```sh
 export TRAININGOS_DB_PATH="$PWD/var/trainingos.sqlite3"

@@ -9,3 +9,5 @@ datasources:
     editable: false
     jsonData:
       path: /var/lib/trainingos/trainingos.sqlite3
+      pathPrefix: "file:"
+      pathOptions: "mode=ro&immutable=1&_pragma=query_only(1)"

@@ -24,3 +24,4 @@ secrets/
 *.sqlite3
 *.fit
 !tests/fixtures/sanitized/*.fit
+*.DS_Store

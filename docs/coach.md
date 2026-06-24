@@ -28,11 +28,33 @@ search, and online research are intentionally out of scope for the local coach.
 Ollama API reference:
 https://github.com/ollama/ollama/blob/main/docs/api.md
 
+Start Ollama before asking the local coach:
+
+```sh
+ollama serve
+ollama pull llama3.2
+```
+
+Check the coach runtime status with:
+
+```sh
+curl http://localhost:8765/api/health
+```
+
+If the provider status is degraded, confirm `ollama list` works and that
+`TRAININGOS_OLLAMA_CHAT_MODEL` matches an installed local model.
+
 ## Evidence behavior
 
 The coach uses `retrieval_documents` and SQLite FTS as its evidence source. A
 coach answer returns the included document IDs, evidence counts by document
 type, caveats, and provider/model metadata.
+
+Generate or refresh those documents from persisted local facts with:
+
+```sh
+PYTHONPATH=src python3 -m trainingos.refresh
+```
 
 When matching evidence is missing, the coach returns a low-confidence local
 data insufficiency answer without calling the chat provider. When a question
