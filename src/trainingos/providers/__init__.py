@@ -449,8 +449,8 @@ def check_anthropic_health(
     headers = _anthropic_headers(api_key)
     request = urllib.request.Request(url, headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=_timeout(timeout_seconds)):
-            pass
+        with urllib.request.urlopen(request, timeout=_timeout(timeout_seconds)) as resp:
+            resp.read()
         return AnthropicHealth(chat_model=model, available=True)
     except (TimeoutError, socket.timeout):
         return AnthropicHealth(
@@ -547,7 +547,7 @@ def _anthropic_http_error(error: urllib.error.HTTPError) -> ProviderError:
             status_code=error.code,
             retryable=True,
         )
-    if error.code == 529 or error.code >= 500:
+    if error.code >= 500:
         return ProviderError(
             ProviderErrorCategory.TRANSIENT,
             "Anthropic returned a transient server error",
