@@ -16,6 +16,7 @@ from trainingos.providers import (
     OllamaEmbeddingProvider,
     ProviderError,
     ProviderErrorCategory,
+    check_ollama_health,
 )
 
 
@@ -178,6 +179,38 @@ class ProviderContractTests(unittest.TestCase):
             ProviderErrorCategory.MALFORMED_RESPONSE,
             raised.exception.category,
         )
+
+    def test_ollama_health_reports_available_model(self) -> None:
+        payload = {
+            "models": [
+                {"name": "llama3.2:latest"},
+                {"model": "nomic-embed-text:latest"},
+            ]
+        }
+        with patch("urllib.request.urlopen", return_value=_Response(json.dumps(payload))):
+            health = check_ollama_health(chat_model="llama3.2:latest")
+
+        self.assertTrue(health.available)
+        self.assertEqual("http://localhost:11434", health.base_url)
+        self.assertEqual("llama3.2:latest", health.chat_model)
+        self.assertIn("llama3.2:latest", health.available_models)
+        self.assertIsNone(health.error)
+
+    def test_ollama_health_reports_missing_service_and_model(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            unavailable = check_ollama_health(chat_model="llama3.2")
+
+        self.assertFalse(unavailable.available)
+        self.assertIn("ollama serve", unavailable.error or "")
+
+        with patch("urllib.request.urlopen", return_value=_Response('{"models": []}')):
+            missing_model = check_ollama_health(chat_model="llama3.2")
+
+        self.assertFalse(missing_model.available)
+        self.assertIn("ollama pull llama3.2", missing_model.error or "")
 
 
 class _Response:
