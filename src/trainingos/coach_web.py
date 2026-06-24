@@ -11,15 +11,29 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
-from trainingos.config import AppConfig
+from trainingos.config import AppConfig, DEFAULT_ANTHROPIC_CHAT_MODEL
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
-from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, check_ollama_health
+from trainingos.providers import (
+    AnthropicChatProvider,
+    AnthropicHealth,
+    ChatProvider,
+    OllamaChatProvider,
+    OllamaHealth,
+    check_anthropic_health,
+    check_ollama_health,
+)
 from trainingos.storage import connect_database
 
 MAX_REQUEST_BYTES = 65536
 
 
-def create_coach_provider(config: AppConfig) -> OllamaChatProvider:
+def create_coach_provider(config: AppConfig) -> ChatProvider:
+    if config.ai_provider == "anthropic":
+        return AnthropicChatProvider(
+            config.anthropic_api_key or "",
+            config.anthropic_chat_model or DEFAULT_ANTHROPIC_CHAT_MODEL,
+            timeout_seconds=config.ai_timeout_seconds,
+        )
     return OllamaChatProvider(
         base_url=config.ollama_base_url,
         model=config.ollama_chat_model,
@@ -33,7 +47,7 @@ def create_server(
     port: int,
     database_path: Path,
     provider: ChatProvider,
-    provider_health: Callable[[], OllamaHealth] | None = None,
+    provider_health: Callable[[], OllamaHealth | AnthropicHealth] | None = None,
 ) -> HTTPServer:
     class TrainingOSCoachHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -133,16 +147,24 @@ def main() -> None:
     host = args.host or config.coach_host
     port = args.port or config.coach_port
     database_path = args.database or config.database_path
+    if config.ai_provider == "anthropic":
+        health_fn: Callable[[], OllamaHealth | AnthropicHealth] = lambda: check_anthropic_health(
+            api_key=config.anthropic_api_key or "",
+            chat_model=config.anthropic_chat_model or DEFAULT_ANTHROPIC_CHAT_MODEL,
+            timeout_seconds=min(config.ai_timeout_seconds, 5.0),
+        )
+    else:
+        health_fn = lambda: check_ollama_health(
+            base_url=config.ollama_base_url,
+            chat_model=config.ollama_chat_model,
+            timeout_seconds=min(config.ai_timeout_seconds, 5.0),
+        )
     server = create_server(
         host=host,
         port=port,
         database_path=database_path,
         provider=create_coach_provider(config),
-        provider_health=lambda: check_ollama_health(
-            base_url=config.ollama_base_url,
-            chat_model=config.ollama_chat_model,
-            timeout_seconds=min(config.ai_timeout_seconds, 5.0),
-        ),
+        provider_health=health_fn,
     )
     try:
         print(f"TrainingOS coach UI listening at http://{host}:{port}")
@@ -169,7 +191,7 @@ def _optional_evidence_limit(value: object) -> int | None:
 
 def _health_payload(
     database_path: Path,
-    provider_health: Callable[[], OllamaHealth] | None,
+    provider_health: Callable[[], OllamaHealth | AnthropicHealth] | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ok",
@@ -189,14 +211,22 @@ def _health_payload(
         ).fetchone()[0]
     if provider_health is not None:
         health = provider_health()
-        payload["provider"] = {
-            "provider": "ollama",
-            "base_url": health.base_url,
-            "chat_model": health.chat_model,
-            "available": health.available,
-            "available_models": list(health.available_models),
-            "error": health.error,
-        }
+        if isinstance(health, AnthropicHealth):
+            payload["provider"] = {
+                "provider": "anthropic",
+                "chat_model": health.chat_model,
+                "available": health.available,
+                "error": health.error,
+            }
+        else:
+            payload["provider"] = {
+                "provider": "ollama",
+                "base_url": health.base_url,
+                "chat_model": health.chat_model,
+                "available": health.available,
+                "available_models": list(health.available_models),
+                "error": health.error,
+            }
         if not health.available:
             payload["status"] = "degraded"
     return payload
