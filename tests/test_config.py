@@ -144,7 +144,6 @@ class AppConfigTests(unittest.TestCase):
         self.assertEqual("anthropic", config.ai_provider)
         self.assertEqual("sk-ant-test", config.anthropic_api_key)
         self.assertEqual("claude-opus-4-7", config.anthropic_chat_model)
-        self.assertIsNone(config.ollama_chat_model if False else None)
 
     def test_anthropic_provider_requires_api_key(self) -> None:
         with self.assertRaisesRegex(ValueError, ANTHROPIC_API_KEY_ENV):
@@ -171,13 +170,12 @@ class AppConfigTests(unittest.TestCase):
 
         self.assertEqual("anthropic", config.ai_provider)
 
-    def test_ollama_provider_fields_are_none_for_anthropic(self) -> None:
-        config = AppConfig.from_env(
-            {AI_PROVIDER_ENV: "anthropic", ANTHROPIC_API_KEY_ENV: "sk-ant-test"}
-        )
+    def test_anthropic_fields_are_none_for_ollama_provider(self) -> None:
+        config = AppConfig.from_env({})
 
-        self.assertIsNone(config.anthropic_api_key if config.ai_provider == "ollama" else None)
-        self.assertEqual("sk-ant-test", config.anthropic_api_key)
+        self.assertEqual("ollama", config.ai_provider)
+        self.assertIsNone(config.anthropic_api_key)
+        self.assertIsNone(config.anthropic_chat_model)
 
 
 if __name__ == "__main__":
