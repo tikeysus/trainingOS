@@ -58,6 +58,15 @@ class ProviderUsage:
 
 
 @dataclass(frozen=True, slots=True)
+class OllamaHealth:
+    base_url: str
+    chat_model: str
+    available: bool
+    available_models: tuple[str, ...] = ()
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ChatMessage:
     role: str
     content: str
@@ -286,6 +295,78 @@ class OllamaEmbeddingProvider:
         )
 
 
+def check_ollama_health(
+    *,
+    base_url: str = "http://localhost:11434",
+    chat_model: str,
+    timeout_seconds: float = 5.0,
+) -> OllamaHealth:
+    normalized_base_url = _base_url(base_url)
+    model = _require_text(chat_model, "chat_model")
+    request = urllib.request.Request(
+        urljoin(f"{normalized_base_url}/", "api/tags"),
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=_timeout(timeout_seconds)) as response:
+            decoded = response.read().decode("utf-8")
+    except (TimeoutError, socket.timeout):
+        return OllamaHealth(
+            base_url=normalized_base_url,
+            chat_model=model,
+            available=False,
+            error="local Ollama health check timed out",
+        )
+    except urllib.error.HTTPError as error:
+        return OllamaHealth(
+            base_url=normalized_base_url,
+            chat_model=model,
+            available=False,
+            error=f"local Ollama /api/tags returned HTTP {error.code}",
+        )
+    except urllib.error.URLError:
+        return OllamaHealth(
+            base_url=normalized_base_url,
+            chat_model=model,
+            available=False,
+            error="local Ollama service is not reachable; start it with `ollama serve`",
+        )
+    try:
+        payload = json.loads(decoded)
+    except json.JSONDecodeError:
+        return OllamaHealth(
+            base_url=normalized_base_url,
+            chat_model=model,
+            available=False,
+            error="local Ollama health check returned malformed JSON",
+        )
+    if not isinstance(payload, dict):
+        return OllamaHealth(
+            base_url=normalized_base_url,
+            chat_model=model,
+            available=False,
+            error="local Ollama health check returned an unexpected response shape",
+        )
+    models = _ollama_model_names(payload)
+    if not _ollama_model_available(model, models):
+        return OllamaHealth(
+            base_url=normalized_base_url,
+            chat_model=model,
+            available=False,
+            available_models=models,
+            error=(
+                f"local Ollama is running but model {model!r} is not installed; "
+                f"run `ollama pull {model}` or set TRAININGOS_OLLAMA_CHAT_MODEL"
+            ),
+        )
+    return OllamaHealth(
+        base_url=normalized_base_url,
+        chat_model=model,
+        available=True,
+        available_models=models,
+    )
+
+
 def _post_json(
     url: str,
     payload: dict[str, object],
@@ -424,3 +505,21 @@ def _require_text(value: str, name: str) -> str:
     if not value or not value.strip():
         raise ValueError(f"{name} must not be blank")
     return value.strip()
+
+
+def _ollama_model_names(payload: dict[str, object]) -> tuple[str, ...]:
+    raw_models = payload.get("models")
+    if not isinstance(raw_models, list):
+        return ()
+    names: list[str] = []
+    for raw_model in raw_models:
+        if not isinstance(raw_model, dict):
+            continue
+        name = raw_model.get("name") or raw_model.get("model")
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return tuple(sorted(dict.fromkeys(names)))
+
+
+def _ollama_model_available(model: str, available_models: tuple[str, ...]) -> bool:
+    return model in available_models or f"{model}:latest" in available_models

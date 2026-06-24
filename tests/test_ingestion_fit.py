@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -9,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from trainingos.config import AppConfig
+from trainingos.config import DATABASE_PATH_ENV, AppConfig
 from trainingos.ingestion import (
     FitMessage,
     ManualFitAdapter,
@@ -239,6 +242,8 @@ class FitIngestionTests(unittest.TestCase):
     def test_fit_import_main_wires_config_migrations_and_sync_runner(self) -> None:
         database_path = self.root / "cli.sqlite3"
         raw_data_dir = self.root / "cli-raw"
+        fit_path = self.root / "workout.fit"
+        fit_path.write_bytes(b"fit")
         connection = unittest.mock.Mock()
         runner = unittest.mock.Mock()
         runner.run.return_value = SimpleNamespace(status=SyncStatus.COMPLETED)
@@ -262,19 +267,20 @@ class FitIngestionTests(unittest.TestCase):
             patch.object(fit_import, "ManualFitAdapter") as adapter_class,
             patch.object(fit_import, "RawArtifactStore") as raw_store_class,
             patch.object(fit_import, "ManualFitHandler") as handler_class,
+            patch.object(fit_import, "refresh_training_data") as refresh_mock,
             patch.object(
                 fit_import,
                 "SyncRunner",
                 return_value=runner,
             ) as runner_class,
         ):
-            exit_code = fit_import.main(["--timezone", "UTC", "workout.fit"])
+            exit_code = fit_import.main(["--timezone", "UTC", str(fit_path)])
 
         self.assertEqual(0, exit_code)
         from_env.assert_called_once_with()
         connect_database_mock.assert_called_once_with(database_path)
         apply_migrations_mock.assert_called_once_with(connection)
-        adapter_class.assert_called_once_with([Path("workout.fit")])
+        adapter_class.assert_called_once_with([fit_path])
         raw_store_class.assert_called_once_with(raw_data_dir)
         handler_class.assert_called_once_with(
             raw_store_class.return_value,
@@ -285,9 +291,12 @@ class FitIngestionTests(unittest.TestCase):
             adapter_class.return_value,
             handler_class.return_value,
         )
+        refresh_mock.assert_called_once_with(connection, timezone="UTC")
         connection.close.assert_called_once_with()
 
     def test_fit_import_main_uses_config_timezone_and_returns_failure(self) -> None:
+        fit_path = self.root / "workout.fit"
+        fit_path.write_bytes(b"fit")
         connection = unittest.mock.Mock()
         runner = unittest.mock.Mock()
         runner.run.return_value = SimpleNamespace(status=SyncStatus.FAILED)
@@ -307,16 +316,59 @@ class FitIngestionTests(unittest.TestCase):
             patch.object(fit_import, "ManualFitAdapter"),
             patch.object(fit_import, "RawArtifactStore") as raw_store_class,
             patch.object(fit_import, "ManualFitHandler") as handler_class,
+            patch.object(fit_import, "refresh_training_data") as refresh_mock,
             patch.object(fit_import, "SyncRunner", return_value=runner),
         ):
-            exit_code = fit_import.main(["workout.fit"])
+            exit_code = fit_import.main([str(fit_path)])
 
         self.assertEqual(1, exit_code)
         handler_class.assert_called_once_with(
             raw_store_class.return_value,
             timezone="America/Toronto",
         )
+        refresh_mock.assert_not_called()
         connection.close.assert_called_once_with()
+
+    def test_fit_import_cli_rejects_missing_path_without_traceback(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "trainingos.ingestion.fit_import",
+                "/path/to/file-or-directory-or-export.zip",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            env=self._pythonpath_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("import path does not exist", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_fit_import_cli_rejects_unreadable_zip_without_traceback(self) -> None:
+        bad_zip = self.root / "bad.zip"
+        bad_zip.write_bytes(b"not really a zip")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "trainingos.ingestion.fit_import",
+                str(bad_zip),
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            env=self._pythonpath_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("FIT zip archive could not be read", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def _messages(self) -> tuple[FitMessage, ...]:
         return (
@@ -384,6 +436,18 @@ class FitIngestionTests(unittest.TestCase):
         }:
             raise ValueError("unsupported table")
         return self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+    def _pythonpath_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        src_path = str(Path(__file__).resolve().parents[1] / "src")
+        existing_pythonpath = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            f"{src_path}{os.pathsep}{existing_pythonpath}"
+            if existing_pythonpath
+            else src_path
+        )
+        env[DATABASE_PATH_ENV] = str(self.database_path)
+        return env
 
 
 if __name__ == "__main__":
