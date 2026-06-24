@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from trainingos.coach_web import create_server
-from trainingos.providers import FakeChatProvider, OllamaHealth
+from trainingos.providers import AnthropicHealth, FakeChatProvider, OllamaHealth
 from trainingos.storage import apply_migrations, connect_database
 
 
@@ -118,6 +118,35 @@ class CoachWebTests(unittest.TestCase):
 
         self.assertIn("only use local TrainingOS evidence", payload["answer"])
         self.assertEqual([], self.provider.requests)
+
+    def test_api_health_reports_anthropic_provider_block(self) -> None:
+        server = create_server(
+            host="127.0.0.1",
+            port=0,
+            database_path=self.database_path,
+            provider=FakeChatProvider(),
+            provider_health=lambda: AnthropicHealth(
+                chat_model="claude-sonnet-4-6",
+                available=True,
+            ),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        try:
+            with urllib.request.urlopen(f"http://{host}:{port}/api/health") as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            server.server_close()
+
+        self.assertEqual("ok", payload["status"])
+        self.assertEqual("anthropic", payload["provider"]["provider"])
+        self.assertTrue(payload["provider"]["available"])
+        self.assertEqual("claude-sonnet-4-6", payload["provider"]["chat_model"])
+        self.assertNotIn("base_url", payload["provider"])
+        self.assertNotIn("available_models", payload["provider"])
 
     def _post_json(self, path: str, payload: dict[str, object]) -> dict[str, object]:
         request = urllib.request.Request(

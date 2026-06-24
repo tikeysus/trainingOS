@@ -7,10 +7,13 @@ from unittest.mock import patch
 from trainingos.config import (
     AI_PROVIDER_ENV,
     AI_TIMEOUT_SECONDS_ENV,
+    ANTHROPIC_API_KEY_ENV,
+    ANTHROPIC_CHAT_MODEL_ENV,
     AppConfig,
     COACH_HOST_ENV,
     COACH_PORT_ENV,
     DATABASE_PATH_ENV,
+    DEFAULT_ANTHROPIC_CHAT_MODEL,
     LOCAL_TIMEZONE_ENV,
     OLLAMA_BASE_URL_ENV,
     OLLAMA_CHAT_MODEL_ENV,
@@ -98,8 +101,8 @@ class AppConfigTests(unittest.TestCase):
         self.assertEqual("localhost", config.coach_host)
         self.assertEqual(8766, config.coach_port)
 
-    def test_ai_provider_is_local_only(self) -> None:
-        with self.assertRaisesRegex(ValueError, "local-only"):
+    def test_unknown_ai_provider_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "TRAININGOS_AI_PROVIDER"):
             AppConfig.from_env({AI_PROVIDER_ENV: "openai"})
 
     def test_ollama_base_url_must_be_local_http_without_credentials(self) -> None:
@@ -127,6 +130,52 @@ class AppConfigTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(ValueError, COACH_PORT_ENV):
                     AppConfig.from_env({COACH_PORT_ENV: value})
+
+
+    def test_anthropic_provider_is_valid(self) -> None:
+        config = AppConfig.from_env(
+            {
+                AI_PROVIDER_ENV: "anthropic",
+                ANTHROPIC_API_KEY_ENV: "sk-ant-test",
+                ANTHROPIC_CHAT_MODEL_ENV: "claude-opus-4-7",
+            }
+        )
+
+        self.assertEqual("anthropic", config.ai_provider)
+        self.assertEqual("sk-ant-test", config.anthropic_api_key)
+        self.assertEqual("claude-opus-4-7", config.anthropic_chat_model)
+
+    def test_anthropic_provider_requires_api_key(self) -> None:
+        with self.assertRaisesRegex(ValueError, ANTHROPIC_API_KEY_ENV):
+            AppConfig.from_env({AI_PROVIDER_ENV: "anthropic"})
+
+        with self.assertRaisesRegex(ValueError, ANTHROPIC_API_KEY_ENV):
+            AppConfig.from_env({AI_PROVIDER_ENV: "anthropic", ANTHROPIC_API_KEY_ENV: "  "})
+
+    def test_anthropic_provider_uses_default_model(self) -> None:
+        config = AppConfig.from_env(
+            {AI_PROVIDER_ENV: "anthropic", ANTHROPIC_API_KEY_ENV: "sk-ant-test"}
+        )
+
+        self.assertEqual(DEFAULT_ANTHROPIC_CHAT_MODEL, config.anthropic_chat_model)
+
+    def test_anthropic_provider_skips_ollama_url_validation(self) -> None:
+        config = AppConfig.from_env(
+            {
+                AI_PROVIDER_ENV: "anthropic",
+                ANTHROPIC_API_KEY_ENV: "sk-ant-test",
+                OLLAMA_BASE_URL_ENV: "https://example.com:11434",
+            }
+        )
+
+        self.assertEqual("anthropic", config.ai_provider)
+
+    def test_anthropic_fields_are_none_for_ollama_provider(self) -> None:
+        config = AppConfig.from_env({})
+
+        self.assertEqual("ollama", config.ai_provider)
+        self.assertIsNone(config.anthropic_api_key)
+        self.assertIsNone(config.anthropic_chat_model)
 
 
 if __name__ == "__main__":

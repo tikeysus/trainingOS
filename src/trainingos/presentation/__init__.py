@@ -23,6 +23,7 @@ from trainingos.retrieval import (
 )
 
 DEFAULT_EVIDENCE_LIMIT = 20
+_ANTHROPIC_CLOUD_CAVEAT = "training data was sent to Anthropic cloud for this answer"
 QUESTION_STOPWORDS = frozenset(
     {
         "a",
@@ -138,11 +139,14 @@ class CoachService:
                     f"local provider failure: {error.category.value}",
                 ),
             )
+        caveats = _answer_caveats(question, selection)
+        if response.metadata.provider == "anthropic":
+            caveats = (*caveats, _ANTHROPIC_CLOUD_CAVEAT)
         return CoachAnswer(
             answer=response.message.content,
             evidence=_evidence_references(selection.results),
             evidence_counts=_evidence_counts(selection.results),
-            caveats=_answer_caveats(question, selection),
+            caveats=caveats,
             provider_metadata=response.metadata,
         )
 
