@@ -48,9 +48,22 @@ def create_server(
     database_path: Path,
     provider: ChatProvider,
     provider_health: Callable[[], OllamaHealth | AnthropicHealth] | None = None,
+    token: str | None = None,
 ) -> HTTPServer:
     class TrainingOSCoachHandler(BaseHTTPRequestHandler):
+        def _check_auth(self) -> bool:
+            if token is None:
+                return True
+            auth = self.headers.get("Authorization", "")
+            return auth == f"Bearer {token}"
+
+        def _send_unauthorized(self) -> None:
+            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+
         def do_GET(self) -> None:
+            if not self._check_auth():
+                self._send_unauthorized()
+                return
             parsed = urlparse(self.path)
             if parsed.path == "/api/health":
                 try:
@@ -70,6 +83,9 @@ def create_server(
             self.wfile.write(body)
 
         def do_POST(self) -> None:
+            if not self._check_auth():
+                self._send_unauthorized()
+                return
             if self.path != "/api/coach":
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
