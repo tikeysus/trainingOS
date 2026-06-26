@@ -18,6 +18,7 @@ from trainingos.ingestion import (
     ManualFitAdapter,
     ManualFitHandler,
     RawArtifactStore,
+    SyncError,
     SyncRunner,
     SyncStatus,
     parse_fit_messages,
@@ -448,6 +449,205 @@ class FitIngestionTests(unittest.TestCase):
         )
         env[DATABASE_PATH_ENV] = str(self.database_path)
         return env
+
+
+class ZipDiscoveryHardeningTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    # --- nesting depth ---
+
+    def test_zip_at_max_nesting_depth_discovers_fit_files(self) -> None:
+        archive_path = self.root / "depth2.zip"
+        inner_bytes = BytesIO()
+        with zipfile.ZipFile(inner_bytes, "w") as inner:
+            inner.writestr("activity.fit", b"fit data")
+        outer_bytes = BytesIO()
+        with zipfile.ZipFile(outer_bytes, "w") as outer:
+            outer.writestr("nested.zip", inner_bytes.getvalue())
+        archive_path.write_bytes(outer_bytes.getvalue())
+
+        adapter = ManualFitAdapter((archive_path,))
+        page = adapter.fetch(None, 100)
+
+        self.assertEqual(1, len(page.records))
+
+    def test_zip_exceeding_max_nesting_depth_raises_sync_error(self) -> None:
+        archive_path = self.root / "depth3.zip"
+        innermost_bytes = BytesIO()
+        with zipfile.ZipFile(innermost_bytes, "w") as innermost:
+            innermost.writestr("activity.fit", b"fit data")
+        middle_bytes = BytesIO()
+        with zipfile.ZipFile(middle_bytes, "w") as middle:
+            middle.writestr("inner.zip", innermost_bytes.getvalue())
+        outer_bytes = BytesIO()
+        with zipfile.ZipFile(outer_bytes, "w") as outer:
+            outer.writestr("middle.zip", middle_bytes.getvalue())
+        archive_path.write_bytes(outer_bytes.getvalue())
+
+        with self.assertRaises(SyncError) as cm:
+            ManualFitAdapter((archive_path,))
+
+        self.assertEqual("fit_zip_depth_exceeded", cm.exception.code)
+
+    # --- member count ---
+
+    def test_zip_at_max_member_count_does_not_raise(self) -> None:
+        archive_path = self.root / "max_members.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            for i in range(1000):
+                archive.writestr(f"file_{i:04d}.dat", b"x")
+
+        ManualFitAdapter((archive_path,))
+
+    def test_zip_exceeding_max_member_count_raises_sync_error_without_filename(
+        self,
+    ) -> None:
+        archive_path = self.root / "overflow.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            for i in range(1001):
+                archive.writestr(f"file_{i:04d}.dat", b"x")
+
+        with self.assertRaises(SyncError) as cm:
+            ManualFitAdapter((archive_path,))
+
+        self.assertEqual("fit_zip_member_count_exceeded", cm.exception.code)
+        self.assertNotIn("file_", str(cm.exception))
+
+    # --- per-member size ---
+
+    def test_zip_fit_member_at_size_limit_succeeds(self) -> None:
+        zip_path = self.root / "at-limit.zip"
+        buf = BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            info = zipfile.ZipInfo("activity.fit")
+            info.compress_type = zipfile.ZIP_STORED
+            zf.writestr(info, b"\x00" * 1024)
+        zip_path.write_bytes(buf.getvalue())
+        with patch("trainingos.ingestion.fit.MAX_ZIP_MEMBER_BYTES", 1024):
+            adapter = ManualFitAdapter((zip_path,))
+        self.assertEqual(1, len(adapter.fetch(None, 100).records))
+
+    def test_zip_fit_member_exceeds_size_limit_raises_sync_error(self) -> None:
+        filename = "oversized.fit"
+        zip_path = self.root / "over-limit.zip"
+        buf = BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            info = zipfile.ZipInfo(filename)
+            info.compress_type = zipfile.ZIP_STORED
+            zf.writestr(info, b"\x00" * 1025)
+        zip_path.write_bytes(buf.getvalue())
+        with patch("trainingos.ingestion.fit.MAX_ZIP_MEMBER_BYTES", 1024):
+            with self.assertRaises(SyncError) as cm:
+                ManualFitAdapter((zip_path,))
+        self.assertEqual("fit_zip_member_too_large", cm.exception.code)
+        self.assertNotIn(filename, str(cm.exception))
+        self.assertNotIn("1025", str(cm.exception))
+
+    # --- total uncompressed size ---
+
+    def test_zip_fit_members_within_individual_limit_but_total_exceeded_raises_sync_error(self) -> None:
+        zip_path = self.root / "total-exceeded.zip"
+        buf = BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for i in range(3):
+                info = zipfile.ZipInfo(f"activity-{i}.fit")
+                info.compress_type = zipfile.ZIP_STORED
+                zf.writestr(info, b"\x00" * 800)
+        zip_path.write_bytes(buf.getvalue())
+        with (
+            patch("trainingos.ingestion.fit.MAX_ZIP_MEMBER_BYTES", 4096),
+            patch("trainingos.ingestion.fit.MAX_ZIP_TOTAL_BYTES", 2000),
+        ):
+            with self.assertRaises(SyncError) as cm:
+                ManualFitAdapter((zip_path,))
+        self.assertEqual("fit_zip_total_size_exceeded", cm.exception.code)
+
+    def test_zip_nested_fit_members_cumulative_total_exceeded_raises_sync_error(self) -> None:
+        nested_buf = BytesIO()
+        with zipfile.ZipFile(nested_buf, "w") as nested:
+            for i in range(2):
+                info = zipfile.ZipInfo(f"inner-activity-{i}.fit")
+                info.compress_type = zipfile.ZIP_STORED
+                nested.writestr(info, b"\x00" * 800)
+        zip_path = self.root / "nested-total.zip"
+        outer_buf = BytesIO()
+        with zipfile.ZipFile(outer_buf, "w") as outer:
+            info = zipfile.ZipInfo("outer-activity.fit")
+            info.compress_type = zipfile.ZIP_STORED
+            outer.writestr(info, b"\x00" * 800)
+            outer.writestr("nested.zip", nested_buf.getvalue())
+        zip_path.write_bytes(outer_buf.getvalue())
+        with (
+            patch("trainingos.ingestion.fit.MAX_ZIP_MEMBER_BYTES", 4096),
+            patch("trainingos.ingestion.fit.MAX_ZIP_TOTAL_BYTES", 2000),
+        ):
+            with self.assertRaises(SyncError) as cm:
+                ManualFitAdapter((zip_path,))
+        self.assertEqual("fit_zip_total_size_exceeded", cm.exception.code)
+
+    # --- corrupt archives ---
+
+    def test_corrupt_outer_zip_raises_fit_zip_unreadable(self) -> None:
+        zip_path = self.root / "corrupt.zip"
+        zip_path.write_bytes(b"\x00garbage\xff\xfe")
+        with self.assertRaises(SyncError) as cm:
+            ManualFitAdapter((zip_path,))
+        self.assertEqual("fit_zip_unreadable", cm.exception.code)
+        self.assertNotIn(str(zip_path), str(cm.exception))
+        self.assertNotIn("garbage", str(cm.exception))
+
+    def test_corrupt_member_in_outer_zip_raises_fit_zip_member_unreadable(self) -> None:
+        zip_path = self.root / "outer.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("activity.fit", b"fit bytes")
+        with patch.object(zipfile.ZipFile, "read", side_effect=OSError("simulated read error")):
+            with self.assertRaises(SyncError) as cm:
+                ManualFitAdapter((zip_path,))
+        self.assertEqual("fit_zip_member_unreadable", cm.exception.code)
+
+    def test_corrupt_nested_zip_raises_fit_nested_zip_unreadable(self) -> None:
+        zip_path = self.root / "outer.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("nested.zip", b"\x00not a zip\xff")
+        with self.assertRaises(SyncError) as cm:
+            ManualFitAdapter((zip_path,))
+        self.assertEqual("fit_nested_zip_unreadable", cm.exception.code)
+
+    # --- discovery summary ---
+
+    def test_discovery_summary_flat_zip(self) -> None:
+        zip_path = self.root / "flat.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("a.fit", b"fit1")
+            zf.writestr("b.fit", b"fit2")
+            zf.writestr("notes.json", b"{}")
+            zf.writestr("data.csv", b"a,b")
+            zf.writestr("readme.txt", b"text")
+        adapter = ManualFitAdapter((zip_path,))
+        self.assertEqual(2, adapter.discovery_summary.fit_count)
+        self.assertEqual(3, adapter.discovery_summary.skipped_count)
+        self.assertEqual(0, adapter.discovery_summary.nested_zip_count)
+
+    def test_discovery_summary_nested_zip(self) -> None:
+        zip_path = self.root / "export.zip"
+        nested_bytes = BytesIO()
+        with zipfile.ZipFile(nested_bytes, "w") as nested:
+            nested.writestr("run1.fit", b"fit1")
+            nested.writestr("run2.fit", b"fit2")
+            nested.writestr("run3.fit", b"fit3")
+            nested.writestr("metadata.json", b"{}")
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("outer.fit", b"fit4")
+            zf.writestr("activities.zip", nested_bytes.getvalue())
+        adapter = ManualFitAdapter((zip_path,))
+        self.assertEqual(4, adapter.discovery_summary.fit_count)
+        self.assertEqual(1, adapter.discovery_summary.skipped_count)
+        self.assertEqual(1, adapter.discovery_summary.nested_zip_count)
 
 
 if __name__ == "__main__":
