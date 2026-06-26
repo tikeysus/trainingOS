@@ -10,8 +10,10 @@ from trainingos.config import (
     ANTHROPIC_API_KEY_ENV,
     ANTHROPIC_CHAT_MODEL_ENV,
     AppConfig,
+    COACH_ALLOW_EXTERNAL_ENV,
     COACH_HOST_ENV,
     COACH_PORT_ENV,
+    COACH_TOKEN_ENV,
     DATABASE_PATH_ENV,
     DEFAULT_ANTHROPIC_CHAT_MODEL,
     LOCAL_TIMEZONE_ENV,
@@ -176,6 +178,56 @@ class AppConfigTests(unittest.TestCase):
         self.assertEqual("ollama", config.ai_provider)
         self.assertIsNone(config.anthropic_api_key)
         self.assertIsNone(config.anthropic_chat_model)
+
+
+class AppConfigGuardTests(unittest.TestCase):
+    def test_default_coach_host_is_localhost(self) -> None:
+        config = AppConfig.from_env({})
+
+        self.assertEqual("127.0.0.1", config.coach_host)
+        self.assertFalse(config.coach_allow_external)
+        self.assertIsNone(config.coach_token)
+
+    def test_non_localhost_host_requires_allow_external_flag(self) -> None:
+        with self.assertRaisesRegex(ValueError, "TRAININGOS_COACH_ALLOW_EXTERNAL"):
+            AppConfig.from_env({COACH_HOST_ENV: "0.0.0.0"})
+
+    def test_network_host_with_allow_external_flag_is_accepted(self) -> None:
+        config = AppConfig.from_env(
+            {COACH_HOST_ENV: "0.0.0.0", COACH_ALLOW_EXTERNAL_ENV: "1"}
+        )
+
+        self.assertEqual("0.0.0.0", config.coach_host)
+        self.assertTrue(config.coach_allow_external)
+
+    def test_localhost_variants_do_not_require_allow_external(self) -> None:
+        for host in ("127.0.0.1", "::1", "localhost"):
+            with self.subTest(host=host):
+                config = AppConfig.from_env({COACH_HOST_ENV: host})
+                self.assertEqual(host, config.coach_host)
+
+    def test_coach_token_is_read_from_environment(self) -> None:
+        config = AppConfig.from_env({COACH_TOKEN_ENV: "secret-abc"})
+
+        self.assertEqual("secret-abc", config.coach_token)
+
+    def test_coach_token_defaults_to_none(self) -> None:
+        config = AppConfig.from_env({})
+
+        self.assertIsNone(config.coach_token)
+
+    def test_coach_token_with_external_host_and_allow_flag(self) -> None:
+        config = AppConfig.from_env(
+            {
+                COACH_HOST_ENV: "0.0.0.0",
+                COACH_ALLOW_EXTERNAL_ENV: "1",
+                COACH_TOKEN_ENV: "my-token",
+            }
+        )
+
+        self.assertEqual("0.0.0.0", config.coach_host)
+        self.assertTrue(config.coach_allow_external)
+        self.assertEqual("my-token", config.coach_token)
 
 
 if __name__ == "__main__":
