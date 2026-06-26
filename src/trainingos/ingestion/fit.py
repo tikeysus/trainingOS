@@ -41,6 +41,12 @@ class FitMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class FitFileClass:
+    is_activity: bool
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class FitImportPayload:
     path: Path
     source_path: str | None = None
@@ -145,6 +151,8 @@ class ManualFitHandler:
 
         synced_at = _ensure_aware(self._clock(), "clock")
         messages = read_fit_messages(path)
+        if not classify_fit_file(messages).is_activity:
+            return SyncDisposition.SKIPPED
         try:
             parsed_for_identity = parse_fit_messages(
                 messages,
@@ -219,6 +227,18 @@ def read_fit_messages(path: Path) -> tuple[FitMessage, ...]:
     except Exception as error:
         raise SyncError("fit_parse_failed", "FIT file could not be parsed") from error
     return tuple(messages)
+
+
+def classify_fit_file(messages: Sequence[FitMessage]) -> FitFileClass:
+    file_id = _first(messages, "file_id")
+    if file_id is None:
+        return FitFileClass(is_activity=True)
+    file_type = file_id.fields.get("type")
+    if file_type is None:
+        return FitFileClass(is_activity=True)
+    if file_type == "activity":
+        return FitFileClass(is_activity=True, reason="activity")
+    return FitFileClass(is_activity=False, reason=str(file_type))
 
 
 def _extract_zip_fit_payloads(
