@@ -136,6 +136,84 @@ class CoachServiceTests(unittest.TestCase):
             provider.requests[0].messages[1].content,
         )
 
+    def test_broad_race_readiness_question_searches_full_history_within_token_budget(self) -> None:
+        self._insert_document(
+            document_id="doc-week-1",
+            document_type="week",
+            source_record_id="week-1",
+            title="Week 2026-11-02",
+            body=(
+                "Week 2026-11-02 to 2026-11-08. Marathon training week total 64.0 km. "
+                "Long run 28 km at easy pace Sunday. Threshold interval session 10 km "
+                "Tuesday. Recovery run 6 km Wednesday. Cumulative marathon build volume "
+                "on track toward race goal. Computed metrics weekly_distance 64000 m "
+                "method 1.0.0."
+            ),
+        )
+        self._insert_document(
+            document_id="doc-race-1",
+            document_type="race",
+            source_record_id="race-1",
+            title="Hamilton Marathon",
+            body=(
+                "Hamilton Marathon race 2026-10-19. Target time 3:10:00. Finish 3:14:22. "
+                "Positive split: held marathon pace to 32 km then faded slightly. "
+                "Post-race recovery normal. Aerobic fitness consistent with marathon "
+                "completion. Race readiness baseline established from this performance. "
+                "Method 1.0.0."
+            ),
+        )
+        self._insert_document(
+            document_id="doc-block-1",
+            document_type="training_block",
+            source_record_id="block-1",
+            title="Marathon Build Block",
+            body=(
+                "Marathon build training block 12 weeks. Peak week 85 km total distance. "
+                "VO2max sessions twice weekly. Long run peak 32 km completed. Taper "
+                "commenced week 11. Race readiness metrics show aerobic base sufficient "
+                "for marathon target pace. Computed method version 1.0.0."
+            ),
+        )
+        provider = FakeChatProvider("Race readiness assessment from local marathon evidence.")
+        service = CoachService(self.connection, provider, token_budget=400)
+
+        answer = service.answer("Am I ready for my marathon race?")
+
+        self.assertGreater(len(answer.evidence), 0)
+        self.assertGreater(len(answer.evidence_counts), 0)
+        if len(answer.evidence) < 3:
+            self.assertIn(
+                "matching local evidence was truncated by evidence budget",
+                answer.caveats,
+            )
+        self.assertGreater(len(provider.requests), 0)
+
+    def test_ambiguous_question_fallback_respects_token_budget(self) -> None:
+        for index in range(4):
+            self._insert_document(
+                document_id=f"doc-week-{index}",
+                document_type="week",
+                source_record_id=f"week-{index}",
+                title=f"Week {index}",
+                body=(
+                    f"Week {index} summary. Total distance 55.0 km. Computed metrics "
+                    "weekly_distance 55000 m method 1.0.0. Long run 20 km at easy effort "
+                    "Sunday. Two quality sessions including tempo run and interval repeats. "
+                    "Average pace 5:20 per km. Elevation gain 380 m. Recovery score "
+                    "adequate. Heart rate zones normal. Provenance computed."
+                ),
+            )
+        provider = FakeChatProvider()
+        service = CoachService(self.connection, provider, token_budget=150)
+
+        answer = service.answer("What should I focus on next?")
+
+        self.assertIn("do not have enough local TrainingOS evidence", answer.answer)
+        self.assertEqual((), answer.evidence)
+        self.assertEqual({}, answer.evidence_counts)
+        self.assertEqual([], provider.requests)
+
     def test_health_question_adds_informational_caveat(self) -> None:
         self._insert_document(
             document_id="doc-note-1",
@@ -213,6 +291,47 @@ class CoachServiceTests(unittest.TestCase):
         )
         self.assertEqual("anthropic", answer.provider_metadata.provider)
 
+    def test_token_budget_overflow_truncates_evidence_and_discloses_counts(self) -> None:
+        base = "marathon weekly distance evidence. "
+        padding = "x" * (400 - len(base))
+        for index in range(5):
+            self._insert_document(
+                document_id=f"doc-week-{index}",
+                document_type="week",
+                source_record_id=f"week-{index}",
+                title=f"Week {index}",
+                body=base + padding,
+            )
+        provider = FakeChatProvider("Truncated answer.")
+        service = CoachService(self.connection, provider, token_budget=150)
+
+        answer = service.answer("marathon weekly distance")
+
+        self.assertLess(len(answer.evidence), 5)
+        self.assertIn("matching local evidence was truncated by evidence budget", answer.caveats)
+        prompt = provider.requests[0].messages[1].content
+        self.assertIn("More matching local documents existed but were omitted by budget.", prompt)
+        self.assertIn("Omitted:", prompt)
+
+    def test_provider_prompt_respects_token_budget_ceiling(self) -> None:
+        base = "marathon weekly distance evidence. "
+        body = base + "x" * (400 - len(base))
+        for index in range(4):
+            self._insert_document(
+                document_id=f"doc-week-{index}",
+                document_type="week",
+                source_record_id=f"week-{index}",
+                title=f"Week {index}",
+                body=body,
+            )
+        provider = FakeChatProvider("Budget ceiling answer.")
+        service = CoachService(self.connection, provider, token_budget=250)
+
+        answer = service.answer("marathon weekly distance")
+
+        self.assertLessEqual(len(answer.evidence), 2)
+        self.assertLessEqual(len(provider.requests[0].messages[1].content) // 4, 250 + 200)
+
     def test_ollama_provider_does_not_inject_cloud_caveat(self) -> None:
         self._insert_document(
             document_id="doc-week-1",
@@ -229,6 +348,40 @@ class CoachServiceTests(unittest.TestCase):
             "training data was sent to Anthropic cloud for this answer",
             answer.caveats,
         )
+
+    def test_missing_data_returns_insufficiency_regardless_of_token_budget(self) -> None:
+        provider = FakeChatProvider()
+        service = CoachService(self.connection, provider, token_budget=100000)
+
+        answer = service.answer("How is my marathon training progressing?")
+
+        self.assertIn("do not have enough local TrainingOS evidence", answer.answer)
+        self.assertEqual((), answer.evidence)
+        self.assertEqual({}, answer.evidence_counts)
+        self.assertEqual(("no matching local retrieval evidence was found",), answer.caveats)
+        self.assertEqual([], provider.requests)
+
+    def test_zero_token_budget_raises_at_construction(self) -> None:
+        with self.assertRaises(ValueError):
+            CoachService(self.connection, FakeChatProvider(), token_budget=0)
+
+    def test_token_budget_single_document_exact_fit_includes_it(self) -> None:
+        body = "weekly distance marathon training run data evidence for coach service unit tests"
+        self.assertEqual(80, len(body))
+        self._insert_document(
+            document_id="doc-week-1",
+            document_type="week",
+            source_record_id="week-1",
+            title="Week 2026-11-02",
+            body=body,
+        )
+        provider = FakeChatProvider("Weekly distance fits token budget.")
+        service = CoachService(self.connection, provider, token_budget=25)
+
+        answer = service.answer("weekly distance marathon")
+
+        self.assertEqual(1, len(answer.evidence))
+        self.assertNotIn("matching local evidence was truncated by evidence budget", answer.caveats)
 
     def _insert_document(
         self,
