@@ -75,12 +75,16 @@ class CoachService:
         chat_provider: ChatProvider,
         *,
         evidence_limit: int = DEFAULT_EVIDENCE_LIMIT,
+        token_budget: int | None = None,
     ) -> None:
         if evidence_limit <= 0:
             raise ValueError("evidence_limit must be positive")
+        if token_budget is not None and token_budget <= 0:
+            raise ValueError("token_budget must be positive")
         self.connection = connection
         self.chat_provider = chat_provider
         self.evidence_limit = evidence_limit
+        self.token_budget = token_budget
 
     def answer(self, question: str) -> CoachAnswer:
         _require_text(question, "question")
@@ -119,6 +123,7 @@ class CoachService:
                                 question,
                                 selection.results,
                                 selection.truncated,
+                                selection.omitted_document_ids,
                             ),
                         ),
                     ),
@@ -155,10 +160,30 @@ class CoachService:
         for query in queries:
             selection = self._search_evidence(query)
             if selection.results:
-                return selection
+                return self._apply_token_budget(selection)
         if _asks_for_broad_training_context(question):
-            return self._recent_evidence()
+            return self._apply_token_budget(self._recent_evidence())
         return EvidenceSelection(results=(), truncated=False)
+
+    def _apply_token_budget(self, selection: "EvidenceSelection") -> "EvidenceSelection":
+        if self.token_budget is None:
+            return selection
+        included: list[RetrievalResult] = []
+        omitted: list[str] = []
+        total_tokens = 0
+        for result in selection.results:
+            doc_tokens = len(result.document.body) // 4
+            if total_tokens + doc_tokens <= self.token_budget:
+                included.append(result)
+                total_tokens += doc_tokens
+            else:
+                omitted.append(result.document.document_id)
+        return EvidenceSelection(
+            results=tuple(included),
+            truncated=selection.truncated or bool(omitted),
+            fallback_reason=selection.fallback_reason,
+            omitted_document_ids=tuple(omitted),
+        )
 
     def _search_evidence(self, query: str) -> "EvidenceSelection":
         if not query:
@@ -210,6 +235,7 @@ class EvidenceSelection:
     results: tuple[RetrievalResult, ...]
     truncated: bool
     fallback_reason: str | None = None
+    omitted_document_ids: tuple[str, ...] = ()
 
 
 def _system_prompt() -> str:
@@ -229,6 +255,7 @@ def _user_prompt(
     question: str,
     results: tuple[RetrievalResult, ...],
     truncated: bool,
+    omitted_document_ids: tuple[str, ...] = (),
 ) -> str:
     lines = [
         f"Question: {question}",
@@ -238,6 +265,8 @@ def _user_prompt(
     ]
     if truncated:
         lines.append("- More matching local documents existed but were omitted by budget.")
+    if omitted_document_ids:
+        lines.append(f"- Omitted: {', '.join(omitted_document_ids)}")
     lines.append("")
     lines.append("Local evidence:")
     for index, result in enumerate(results, start=1):
@@ -357,11 +386,14 @@ def _asks_health_question(question: str) -> bool:
 def _asks_for_broad_training_context(question: str) -> bool:
     normalized = question.lower()
     markers = (
-        "activity",
         "activities",
+        "activity",
         "block",
         "fitness",
+        "marathon",
+        "race",
         "readiness",
+        "ready",
         "recent",
         "training",
         "week",
