@@ -24,6 +24,7 @@ from trainingos.ingestion import (
     parse_fit_messages,
 )
 from trainingos.ingestion import fit_import
+from trainingos.ingestion.fit import classify_fit_file, FitFileClass
 from trainingos.storage import apply_migrations, connect_database
 
 
@@ -172,6 +173,203 @@ class FitIngestionTests(unittest.TestCase):
             "SELECT storage_path FROM raw_source_records WHERE source = 'manual_fit'"
         ).fetchone()
         self.assertEqual(b"activity fit", Path(raw["storage_path"]).read_bytes())
+
+    def test_classify_activity_type_string_returns_activity(self) -> None:
+        messages = (
+            FitMessage("file_id", {"type": "activity"}),
+        )
+        result = classify_fit_file(messages)
+        self.assertTrue(result.is_activity)
+
+    def test_classify_device_type_returns_non_activity(self) -> None:
+        messages = (
+            FitMessage("file_id", {"type": "device"}),
+        )
+        result = classify_fit_file(messages)
+        self.assertFalse(result.is_activity)
+        self.assertIn("device", result.reason)
+
+    def test_classify_settings_type_returns_non_activity(self) -> None:
+        messages = (
+            FitMessage("file_id", {"type": "settings"}),
+        )
+        result = classify_fit_file(messages)
+        self.assertFalse(result.is_activity)
+
+    def test_classify_course_type_returns_non_activity(self) -> None:
+        messages = (
+            FitMessage("file_id", {"type": "course"}),
+        )
+        result = classify_fit_file(messages)
+        self.assertFalse(result.is_activity)
+
+    def test_classify_workout_type_returns_non_activity(self) -> None:
+        messages = (
+            FitMessage("file_id", {"type": "workout"}),
+        )
+        result = classify_fit_file(messages)
+        self.assertFalse(result.is_activity)
+
+    def test_classify_without_file_id_message_falls_through_to_activity(self) -> None:
+        messages = (
+            FitMessage("session", {"sport": "running"}),
+        )
+        result = classify_fit_file(messages)
+        self.assertTrue(result.is_activity)
+
+    def test_classify_file_id_without_type_field_falls_through_to_activity(self) -> None:
+        messages = (
+            FitMessage("file_id", {"serial_number": 99999}),
+        )
+        result = classify_fit_file(messages)
+        self.assertTrue(result.is_activity)
+
+    def test_classify_monitoring_type_returns_non_activity(self) -> None:
+        messages = (
+            FitMessage("file_id", {"type": "monitoring_a"}),
+        )
+        result = classify_fit_file(messages)
+        self.assertFalse(result.is_activity)
+
+    def test_handler_skips_device_fit_without_retaining_raw_artifact(self) -> None:
+        fit_path = self.root / "device.fit"
+        fit_path.write_bytes(b"device fit bytes")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="America/Toronto",
+            clock=self.clock,
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=(FitMessage("file_id", {"type": "device"}),),
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        self.assertEqual(SyncStatus.COMPLETED, report.status)
+        self.assertEqual(1, report.skipped_count)
+        self.assertEqual(0, self._count("raw_source_records"))
+        self.assertEqual(0, self._count("activities"))
+
+    def test_handler_skips_course_fit_without_retaining_raw_artifact(self) -> None:
+        fit_path = self.root / "course.fit"
+        fit_path.write_bytes(b"course fit bytes")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="America/Toronto",
+            clock=self.clock,
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=(FitMessage("file_id", {"type": "course"}),),
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        self.assertEqual(SyncStatus.COMPLETED, report.status)
+        self.assertEqual(1, report.skipped_count)
+        self.assertEqual(0, self._count("raw_source_records"))
+        self.assertEqual(0, self._count("activities"))
+
+    def test_handler_skips_workout_fit_without_retaining_raw_artifact(self) -> None:
+        fit_path = self.root / "workout.fit"
+        fit_path.write_bytes(b"workout fit bytes")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="America/Toronto",
+            clock=self.clock,
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=(FitMessage("file_id", {"type": "workout"}),),
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        self.assertEqual(SyncStatus.COMPLETED, report.status)
+        self.assertEqual(1, report.skipped_count)
+        self.assertEqual(0, self._count("raw_source_records"))
+        self.assertEqual(0, self._count("activities"))
+
+    def test_handler_skips_settings_fit_without_retaining_raw_artifact(self) -> None:
+        fit_path = self.root / "settings.fit"
+        fit_path.write_bytes(b"settings fit bytes")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="America/Toronto",
+            clock=self.clock,
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=(FitMessage("file_id", {"type": "settings"}),),
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        self.assertEqual(SyncStatus.COMPLETED, report.status)
+        self.assertEqual(1, report.skipped_count)
+        self.assertEqual(0, self._count("raw_source_records"))
+        self.assertEqual(0, self._count("activities"))
+
+    def test_mixed_export_zip_counts_activity_and_non_activity_correctly(self) -> None:
+        export_zip = self.root / "garmin-export.zip"
+        with zipfile.ZipFile(export_zip, "w") as archive:
+            archive.writestr("a-device.fit", b"device fit")
+            archive.writestr("b-course.fit", b"course fit")
+            archive.writestr("c-activity.fit", b"activity fit")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="America/Toronto",
+            clock=self.clock,
+        )
+        device_messages = (FitMessage("file_id", {"type": "device"}),)
+        course_messages = (FitMessage("file_id", {"type": "course"}),)
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            side_effect=(device_messages, course_messages, self._messages()),
+        ):
+            report = runner.run(ManualFitAdapter((export_zip,)), handler)
+
+        self.assertEqual(SyncStatus.COMPLETED, report.status)
+        self.assertEqual(1, report.imported_count)
+        self.assertEqual(2, report.skipped_count)
+        self.assertEqual(1, self._count("activities"))
+        self.assertEqual(1, self._count("raw_source_records"))
+
+    def test_skip_reason_recorded_for_non_activity_fit(self) -> None:
+        fit_path = self.root / "device.fit"
+        fit_path.write_bytes(b"device fit bytes")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="America/Toronto",
+            clock=self.clock,
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=(FitMessage("file_id", {"type": "device"}),),
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        self.assertEqual(1, report.skipped_count)
+        # Deliberate non-activity skips must not be recorded as errors.
+        error = self.connection.execute(
+            "SELECT error_code FROM sync_errors WHERE sync_run_id = ?",
+            (report.sync_run_id,),
+        ).fetchone()
+        self.assertIsNone(error)
+        # TODO: tighten once the skip-reason API is finalised. If SyncReport
+        # gains a skip_reasons dict (e.g. {"non_activity_file_type": 1}), assert
+        # that here. For now we verify the count and the absence of an error row.
+        # Example of what a future assertion might look like:
+        #   self.assertIn("device", report.skip_reasons.get("non_activity_file_type", ""))
 
     def test_malformed_fit_fails_without_normalized_or_raw_rows(self) -> None:
         fit_path = self.root / "malformed.fit"
@@ -427,6 +625,193 @@ class FitIngestionTests(unittest.TestCase):
                 },
             ),
         )
+
+    def test_standalone_non_activity_fit_raises_or_skips_clearly_without_raw_artifact(
+        self,
+    ) -> None:
+        # Design TBD: Option A raises SyncError (strict), Option B returns SKIPPED.
+        # Either way the import must not silently succeed and must write nothing.
+        fit_path = self.root / "device.fit"
+        fit_path.write_bytes(b"device fit bytes")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="UTC",
+            clock=self.clock,
+        )
+        device_messages = (
+            FitMessage("file_id", {"type": "device", "serial_number": 11111}),
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=device_messages,
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        is_strict_failure = (
+            report.status == SyncStatus.FAILED
+            and report.failed_count == 1
+        )
+        is_deliberate_skip = report.skipped_count == 1
+
+        self.assertTrue(
+            is_strict_failure or is_deliberate_skip,
+            f"expected explicit failure or deliberate skip, got status={report.status!r} "
+            f"failed={report.failed_count} skipped={report.skipped_count}",
+        )
+        self.assertEqual(0, self._count("raw_source_records"))
+        self.assertEqual(0, self._count("activities"))
+
+        if is_strict_failure:
+            error = self.connection.execute(
+                "SELECT error_code FROM sync_errors WHERE sync_run_id = ?",
+                (report.sync_run_id,),
+            ).fetchone()
+            self.assertIn(
+                error["error_code"],
+                {"fit_non_activity", "fit_session_missing"},
+            )
+
+    def test_standalone_truly_malformed_fit_still_fails(self) -> None:
+        fit_path = self.root / "malformed2.fit"
+        fit_path.write_bytes(b"corrupted fit bytes")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="UTC",
+            clock=self.clock,
+        )
+
+        # Empty message set → no session → fit_session_missing; stands in for
+        # the parse-failed path because standalone never has skip_missing_session.
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=(),
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        self.assertEqual(SyncStatus.FAILED, report.status)
+        self.assertEqual(1, report.failed_count)
+        self.assertEqual(0, self._count("raw_source_records"))
+
+        error = self.connection.execute(
+            "SELECT error_code, message FROM sync_errors WHERE sync_run_id = ?",
+            (report.sync_run_id,),
+        ).fetchone()
+        self.assertIsNotNone(error, "expected a sync_errors row for the failure")
+        self.assertIn(
+            error["error_code"],
+            {"fit_parse_failed", "fit_session_missing"},
+        )
+        # Message must be a human-readable string, not a raw traceback dump.
+        self.assertNotIn("Traceback", error["message"])
+
+    def test_standalone_missing_session_activity_type_fails_strictly(
+        self,
+    ) -> None:
+        fit_path = self.root / "activity-nosession.fit"
+        fit_path.write_bytes(b"activity fit no session")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="UTC",
+            clock=self.clock,
+        )
+        # file_id says "activity" but there is no session message.
+        activity_no_session = (
+            FitMessage(
+                "file_id",
+                {
+                    "type": "activity",
+                    "serial_number": 22222,
+                },
+            ),
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=activity_no_session,
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        # standalone → skip_missing_session=False → must fail, never silently skip
+        self.assertEqual(SyncStatus.FAILED, report.status)
+        self.assertEqual(1, report.failed_count)
+        self.assertEqual(0, self._count("raw_source_records"))
+
+        error = self.connection.execute(
+            "SELECT error_code FROM sync_errors WHERE sync_run_id = ?",
+            (report.sync_run_id,),
+        ).fetchone()
+        self.assertEqual("fit_session_missing", error["error_code"])
+
+    def test_zip_non_activity_fit_is_skipped_not_failed(self) -> None:
+        # Contrasts with standalone tests: zip sets skip_missing_session=True,
+        # so a device file with no session is a skip, not a failure.
+        export_zip = self.root / "garmin-mixed.zip"
+        with zipfile.ZipFile(export_zip, "w") as archive:
+            archive.writestr("a-device-settings.fit", b"device fit bytes")
+            archive.writestr("b-run-activity.fit", b"activity fit bytes")
+
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="UTC",
+            clock=self.clock,
+        )
+        device_messages = (
+            FitMessage("file_id", {"type": "device", "serial_number": 33333}),
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            side_effect=(device_messages, self._messages()),
+        ):
+            report = runner.run(ManualFitAdapter((export_zip,)), handler)
+
+        self.assertEqual(SyncStatus.COMPLETED, report.status)
+        self.assertEqual(0, report.failed_count)
+        self.assertGreaterEqual(report.skipped_count, 1)
+        self.assertEqual(1, self._count("activities"))
+
+    def test_classify_fit_file_error_message_does_not_leak_file_content(
+        self,
+    ) -> None:
+        fit_path = self.root / "course.fit"
+        fit_bytes = b"course fit bytes that must not appear in error logs"
+        fit_path.write_bytes(fit_bytes)
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir),
+            timezone="UTC",
+            clock=self.clock,
+        )
+        course_messages = (
+            FitMessage("file_id", {"type": "course", "serial_number": 44444}),
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            return_value=course_messages,
+        ):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        error = self.connection.execute(
+            "SELECT message FROM sync_errors WHERE sync_run_id = ?",
+            (report.sync_run_id,),
+        ).fetchone()
+        if error is not None:
+            self.assertNotIn(
+                fit_bytes.decode(errors="replace"),
+                error["message"],
+                "raw file bytes must not appear in the error message",
+            )
+            self.assertNotIn(
+                str(fit_path),
+                error["message"],
+                "raw filesystem path must not appear in the error message",
+            )
 
     def _count(self, table: str) -> int:
         if table not in {
