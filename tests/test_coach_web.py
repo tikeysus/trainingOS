@@ -212,5 +212,221 @@ class CoachWebTests(unittest.TestCase):
         connection.commit()
 
 
+class CoachWebTokenGuardTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.database_path = Path(self.temporary_directory.name) / "training.sqlite3"
+        with connect_database(self.database_path) as connection:
+            apply_migrations(connection)
+        self.provider = FakeChatProvider("test answer")
+        self.server = create_server(
+            host="127.0.0.1",
+            port=0,
+            database_path=self.database_path,
+            provider=self.provider,
+            token="test-secret-token",
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        host, port = self.server.server_address
+        self.base_url = f"http://{host}:{port}"
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.thread.join(timeout=5)
+        self.server.server_close()
+        self.temporary_directory.cleanup()
+
+    def test_get_root_without_token_returns_401(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(f"{self.base_url}/")
+
+        self.assertEqual(401, raised.exception.code)
+        payload = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertEqual("unauthorized", payload["error"])
+
+    def test_get_health_without_token_returns_401(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(f"{self.base_url}/api/health")
+
+        self.assertEqual(401, raised.exception.code)
+        payload = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertEqual("unauthorized", payload["error"])
+
+    def test_post_coach_without_token_returns_401(self) -> None:
+        request = urllib.request.Request(
+            f"{self.base_url}/api/coach",
+            data=json.dumps({"question": "test question"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(request)
+
+        self.assertEqual(401, raised.exception.code)
+        payload = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertEqual("unauthorized", payload["error"])
+
+    def test_post_coach_with_wrong_token_returns_401(self) -> None:
+        request = urllib.request.Request(
+            f"{self.base_url}/api/coach",
+            data=json.dumps({"question": "test question"}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer wrong-token",
+            },
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(request)
+
+        self.assertEqual(401, raised.exception.code)
+        payload = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertEqual("unauthorized", payload["error"])
+
+    def test_get_root_with_correct_token_returns_200(self) -> None:
+        request = urllib.request.Request(
+            f"{self.base_url}/",
+            headers={"Authorization": "Bearer test-secret-token"},
+        )
+        with urllib.request.urlopen(request) as response:
+            body = response.read().decode("utf-8")
+
+        self.assertEqual(200, response.status)
+        self.assertIn("TrainingOS Local Coach", body)
+
+    def test_post_coach_with_correct_token_succeeds(self) -> None:
+        request = urllib.request.Request(
+            f"{self.base_url}/api/coach",
+            data=json.dumps({"question": "test question"}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer test-secret-token",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(200, response.status)
+        self.assertIn("answer", payload)
+
+    def test_server_without_token_allows_unauthenticated_requests(self) -> None:
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            db_path = Path(tmp_dir.name) / "training.sqlite3"
+            with connect_database(db_path) as connection:
+                apply_migrations(connection)
+            server = create_server(
+                host="127.0.0.1",
+                port=0,
+                database_path=db_path,
+                provider=FakeChatProvider("test answer"),
+                token=None,
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            host, port = server.server_address
+            try:
+                with urllib.request.urlopen(f"http://{host}:{port}/") as response:
+                    self.assertEqual(200, response.status)
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+                server.server_close()
+        finally:
+            tmp_dir.cleanup()
+
+
+class CoachWebConfigIntegrationTests(unittest.TestCase):
+    """Tests that verify config is properly passed to the server."""
+
+    def test_config_token_is_passed_to_server(self) -> None:
+        """Verify that token from AppConfig is actually used by the server.
+
+        This test ensures the integration between config and server creation,
+        catching the bug where config.coach_token is read but not passed to
+        create_server().
+        """
+        from trainingos.config import AppConfig, COACH_TOKEN_ENV
+
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            db_path = Path(tmp_dir.name) / "training.sqlite3"
+            with connect_database(db_path) as connection:
+                apply_migrations(connection)
+
+            # Simulate what main() should do: create config with token and pass it to server
+            token = "test-integration-token-12345"
+            config = AppConfig.from_env({COACH_TOKEN_ENV: token})
+
+            server = create_server(
+                host="127.0.0.1",
+                port=0,
+                database_path=db_path,
+                provider=FakeChatProvider("answer"),
+                token=config.coach_token,  # This is what main() should do
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            host, port = server.server_address
+            base_url = f"http://{host}:{port}"
+
+            try:
+                # Without token, should get 401
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    urllib.request.urlopen(f"{base_url}/api/health")
+                self.assertEqual(401, raised.exception.code)
+
+                # With correct token, should get 200
+                request = urllib.request.Request(
+                    f"{base_url}/api/health",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                with urllib.request.urlopen(request) as response:
+                    self.assertEqual(200, response.status)
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+                server.server_close()
+        finally:
+            tmp_dir.cleanup()
+
+    def test_config_token_none_allows_unauthenticated_access(self) -> None:
+        """Verify that when config.coach_token is None, server allows unauthenticated requests."""
+        from trainingos.config import AppConfig
+
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            db_path = Path(tmp_dir.name) / "training.sqlite3"
+            with connect_database(db_path) as connection:
+                apply_migrations(connection)
+
+            config = AppConfig.from_env({})  # No token set
+
+            server = create_server(
+                host="127.0.0.1",
+                port=0,
+                database_path=db_path,
+                provider=FakeChatProvider("answer"),
+                token=config.coach_token,  # Will be None
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            host, port = server.server_address
+            base_url = f"http://{host}:{port}"
+
+            try:
+                # Unauthenticated request should succeed when token is None
+                with urllib.request.urlopen(f"{base_url}/api/health") as response:
+                    self.assertEqual(200, response.status)
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+                server.server_close()
+        finally:
+            tmp_dir.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()

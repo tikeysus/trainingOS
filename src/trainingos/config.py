@@ -13,8 +13,10 @@ AI_PROVIDER_ENV = "TRAININGOS_AI_PROVIDER"
 AI_TIMEOUT_SECONDS_ENV = "TRAININGOS_AI_TIMEOUT_SECONDS"
 ANTHROPIC_API_KEY_ENV = "TRAININGOS_ANTHROPIC_API_KEY"
 ANTHROPIC_CHAT_MODEL_ENV = "TRAININGOS_ANTHROPIC_CHAT_MODEL"
+COACH_ALLOW_EXTERNAL_ENV = "TRAININGOS_COACH_ALLOW_EXTERNAL"
 COACH_HOST_ENV = "TRAININGOS_COACH_HOST"
 COACH_PORT_ENV = "TRAININGOS_COACH_PORT"
+COACH_TOKEN_ENV = "TRAININGOS_COACH_TOKEN"
 DATABASE_PATH_ENV = "TRAININGOS_DB_PATH"
 LOCAL_TIMEZONE_ENV = "TRAININGOS_LOCAL_TIMEZONE"
 OLLAMA_BASE_URL_ENV = "TRAININGOS_OLLAMA_BASE_URL"
@@ -52,6 +54,8 @@ class AppConfig:
     anthropic_chat_model: str | None = None
     coach_host: str = DEFAULT_COACH_HOST
     coach_port: int = DEFAULT_COACH_PORT
+    coach_allow_external: bool = False
+    coach_token: str | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> AppConfig:
@@ -113,6 +117,14 @@ class AppConfig:
         )
         coach_host = _configured_text(values, COACH_HOST_ENV, DEFAULT_COACH_HOST)
         coach_port = _configured_port(values, COACH_PORT_ENV, DEFAULT_COACH_PORT)
+        coach_allow_external = values.get(COACH_ALLOW_EXTERNAL_ENV, "").strip() in {"1", "true", "yes"}
+        if not _is_localhost(coach_host) and not coach_allow_external:
+            raise ValueError(
+                f"TRAININGOS_COACH_ALLOW_EXTERNAL must be set to '1' when binding to a "
+                f"non-localhost address ({coach_host!r})"
+            )
+        coach_token_raw = values.get(COACH_TOKEN_ENV, "").strip()
+        coach_token: str | None = coach_token_raw if coach_token_raw else None
         return cls(
             database_path=database_path.expanduser().absolute(),
             raw_data_dir=raw_data_dir.expanduser().absolute(),
@@ -126,6 +138,8 @@ class AppConfig:
             anthropic_chat_model=anthropic_chat_model,
             coach_host=coach_host,
             coach_port=coach_port,
+            coach_allow_external=coach_allow_external,
+            coach_token=coach_token,
         )
 
 
@@ -197,6 +211,10 @@ def _configured_port(
     if port <= 0 or port > 65535:
         raise ValueError(f"{name} must be between 1 and 65535")
     return port
+
+
+def _is_localhost(host: str) -> bool:
+    return host in {"127.0.0.1", "::1", "localhost"}
 
 
 def _validate_local_ollama_url(value: str) -> None:
