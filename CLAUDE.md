@@ -1,17 +1,11 @@
 # TrainingOS Agent Guide
 
+## Pending: Lock Down Personal Data
+Once Garmin ingestion is stable and all data is normalized into SQLite, add `var/76e88aeb-*/` to `.claudeignore` to prevent raw GDPR export files from entering context.
+
 ## Product
 
-TrainingOS: local-first running intelligence platform. Goal: sub-3:10 marathon
-(current PR 3:23, target: Hamilton Marathon).
-
-The product must help answer:
-
-- Am I on track for 3:10, and with what confidence?
-- How does this block compare with previous blocks?
-- What explains changes in performance, heart rate, or fatigue?
-- Is training load progressing appropriately?
-- How are aerobic efficiency and recovery changing?
+TrainingOS: local-first running intelligence platform. 
 
 ## Non-Negotiable Architecture
 
