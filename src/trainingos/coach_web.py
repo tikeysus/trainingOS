@@ -181,6 +181,7 @@ def main() -> None:
         database_path=database_path,
         provider=create_coach_provider(config),
         provider_health=health_fn,
+        token=config.coach_token,
     )
     try:
         print(f"TrainingOS coach UI listening at http://{host}:{port}")
