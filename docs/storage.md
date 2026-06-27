@@ -7,8 +7,28 @@ TrainingOS uses SQLite for durable local data. The database path defaults to
 export TRAININGOS_DB_PATH=/path/to/trainingos.sqlite3
 ```
 
-Database files, local environment files, credentials, and personal source data
-must not be committed.
+## Repository hygiene
+
+The following must never be committed:
+
+- SQLite database files (`*.sqlite3`, `*.sqlite`, `*.db`, WAL/SHM sidecars).
+- Raw Garmin export zips and real FIT activity files. These contain precise
+  GPS tracks, heart-rate data, and other personal health information.
+- Environment files (`.env`, `.env.*`) and anything under `data/`, `imports/`,
+  `private/`, `raw/`, or `secrets/`.
+- macOS metadata (`.DS_Store`) and Python build artefacts (`__pycache__/`,
+  `*.pyc`, `.venv/`).
+
+All of the above are covered by `.gitignore`. `tests/test_gitignore.py`
+verifies each category so regressions are caught by the test suite.
+
+### Test fixtures
+
+Sanitized FIT files stripped of personal data may be committed under
+`tests/fixtures/sanitized/`. That path is explicitly allowed in `.gitignore`
+via the `!tests/fixtures/sanitized/*.fit` exception. All other `*.fit` files
+remain blocked. Before adding a fixture, confirm it contains no real GPS
+coordinates, timestamps, or health measurements that could identify a person.
 
 Raw FIT/API artifacts default to `~/.local/share/trainingos/raw` and can be
 overridden with:
