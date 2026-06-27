@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import zipfile
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -32,6 +32,24 @@ from trainingos.normalization import NormalizationStore
 MANUAL_FIT_SOURCE = "manual_fit"
 FIT_CONTENT_TYPE = "application/vnd.ant.fit"
 FIT_PARSER = MethodVersion("fitdecode_fit_parser", "1.0.0")
+
+MAX_ZIP_NESTING_DEPTH = 1
+MAX_ZIP_MEMBERS = 1000
+MAX_ZIP_MEMBER_BYTES = 500 * 1024 * 1024
+MAX_ZIP_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
+
+
+@dataclass
+class DiscoverySummary:
+    fit_count: int = 0
+    skipped_count: int = 0
+    nested_zip_count: int = 0
+
+
+@dataclass
+class _ExtractionState:
+    total_bytes: int = 0
+    summary: DiscoverySummary = field(default_factory=DiscoverySummary)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +79,7 @@ class ManualFitAdapter:
 
     def __init__(self, paths: Iterable[Path]) -> None:
         self._temporary_directory: tempfile.TemporaryDirectory[str] | None = None
+        self._discovery_summary = DiscoverySummary()
         files: list[FitImportPayload] = []
         for source_index, path in enumerate(paths, start=1):
             resolved = path.expanduser().absolute()
@@ -74,11 +93,13 @@ class ManualFitAdapter:
                     )
                 )
             elif resolved.suffix.lower() == ".zip":
+                state = _ExtractionState(summary=self._discovery_summary)
                 files.extend(
                     _extract_zip_fit_payloads(
                         resolved,
                         self._temporary_root(),
                         source_index,
+                        state,
                     )
                 )
             else:
@@ -102,6 +123,10 @@ class ManualFitAdapter:
                 )
             )
         return SyncPage(records=tuple(records), done=True)
+
+    @property
+    def discovery_summary(self) -> DiscoverySummary:
+        return self._discovery_summary
 
     def cursor_is_at_or_after(self, previous: str, candidate: str) -> bool:
         return int(candidate) >= int(previous)
@@ -225,6 +250,7 @@ def _extract_zip_fit_payloads(
     archive_path: Path,
     target_root: Path,
     source_index: int,
+    state: _ExtractionState,
 ) -> tuple[FitImportPayload, ...]:
     extracted: list[FitImportPayload] = []
     try:
@@ -234,6 +260,8 @@ def _extract_zip_fit_payloads(
                 target_root,
                 source_index,
                 extracted,
+                state,
+                depth=0,
             )
     except (OSError, zipfile.BadZipFile) as error:
         raise SyncError("fit_zip_unreadable", "FIT zip archive could not be read") from error
@@ -245,19 +273,30 @@ def _extract_fit_members(
     target_root: Path,
     source_index: int,
     extracted: list[FitImportPayload],
+    state: _ExtractionState,
+    depth: int,
 ) -> None:
-    for member in sorted(archive.infolist(), key=lambda info: info.filename):
+    members = archive.infolist()
+    if len(members) > MAX_ZIP_MEMBERS:
+        raise SyncError("fit_zip_member_count_exceeded", "FIT zip archive has too many members")
+    for member in sorted(members, key=lambda info: info.filename):
         if member.is_dir():
             continue
         lower_name = member.filename.lower()
-        try:
-            content = archive.read(member)
-        except (OSError, zipfile.BadZipFile) as error:
-            raise SyncError(
-                "fit_zip_member_unreadable",
-                "FIT zip archive member could not be read",
-            ) from error
         if lower_name.endswith(".fit"):
+            if member.file_size > MAX_ZIP_MEMBER_BYTES:
+                raise SyncError("fit_zip_member_too_large", "FIT zip member is too large")
+            try:
+                content = archive.read(member)
+            except (OSError, zipfile.BadZipFile) as error:
+                raise SyncError(
+                    "fit_zip_member_unreadable",
+                    "FIT zip archive member could not be read",
+                ) from error
+            state.total_bytes += len(content)
+            if state.total_bytes > MAX_ZIP_TOTAL_BYTES:
+                raise SyncError("fit_zip_total_size_exceeded", "FIT zip total uncompressed size exceeded")
+            state.summary.fit_count += 1
             digest = hashlib.sha256(content).hexdigest()
             sequence = len(extracted) + 1
             extracted_path = target_root / f"fit-{sequence:06d}-{digest[:16]}.fit"
@@ -273,6 +312,18 @@ def _extract_fit_members(
             )
             continue
         if lower_name.endswith(".zip"):
+            if depth >= MAX_ZIP_NESTING_DEPTH:
+                raise SyncError("fit_zip_depth_exceeded", "FIT zip nesting depth exceeded")
+            if member.file_size > MAX_ZIP_MEMBER_BYTES:
+                raise SyncError("fit_zip_member_too_large", "FIT zip member is too large")
+            state.summary.nested_zip_count += 1
+            try:
+                content = archive.read(member)
+            except (OSError, zipfile.BadZipFile) as error:
+                raise SyncError(
+                    "fit_zip_member_unreadable",
+                    "FIT zip archive member could not be read",
+                ) from error
             try:
                 with zipfile.ZipFile(io.BytesIO(content)) as nested_archive:
                     _extract_fit_members(
@@ -280,12 +331,16 @@ def _extract_fit_members(
                         target_root,
                         source_index,
                         extracted,
+                        state,
+                        depth + 1,
                     )
             except zipfile.BadZipFile as error:
                 raise SyncError(
                     "fit_nested_zip_unreadable",
                     "nested FIT zip archive could not be read",
                 ) from error
+            continue
+        state.summary.skipped_count += 1
 
 
 def _deduplicate_payloads(
