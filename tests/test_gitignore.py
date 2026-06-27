@@ -105,3 +105,26 @@ class GitignoreHygieneTests(unittest.TestCase):
 
     def test_sanitized_fit_fixture_is_not_ignored(self) -> None:
         self.assertFalse(_is_ignored("tests/fixtures/sanitized/sample.fit"))
+
+    # Nested fixture safety: only top-level fixtures are allowed
+
+    def test_nested_fit_in_fixture_subdirectory_is_ignored(self) -> None:
+        # Fixtures organized in subdirectories (e.g., by year/month) are ignored
+        # to prevent accidental commitment of real data in nested structure.
+        # Developers must flatten fixtures to top level.
+        self.assertTrue(_is_ignored("tests/fixtures/sanitized/2024-01/sample.fit"))
+
+    def test_deeply_nested_fit_in_fixture_subdirectory_is_ignored(self) -> None:
+        # Multiple levels of nesting are also blocked.
+        self.assertTrue(_is_ignored("tests/fixtures/sanitized/year/month/day/sample.fit"))
+
+    # Edge case: .env.example variants
+
+    def test_env_example_variant_is_ignored(self) -> None:
+        # Only .env.example is allowed; other variants like .env.example.local
+        # are still ignored to prevent leaking real environment data.
+        self.assertTrue(_is_ignored(".env.example.local"))
+
+    def test_env_example_production_is_ignored(self) -> None:
+        # Variants of env.example with suffixes are also blocked.
+        self.assertTrue(_is_ignored(".env.example.production"))
