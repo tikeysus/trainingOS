@@ -548,6 +548,21 @@ class ZipDiscoveryHardeningTests(unittest.TestCase):
         self.assertNotIn(filename, str(cm.exception))
         self.assertNotIn("1025", str(cm.exception))
 
+    def test_zip_nested_member_exceeds_size_limit_raises_sync_error(self) -> None:
+        zip_path = self.root / "nested-over-limit.zip"
+        outer_buf = BytesIO()
+        with zipfile.ZipFile(outer_buf, "w") as outer:
+            nested_info = zipfile.ZipInfo("nested.zip")
+            nested_info.compress_type = zipfile.ZIP_STORED
+            outer.writestr(nested_info, b"\x00" * 1025)
+        zip_path.write_bytes(outer_buf.getvalue())
+        with patch("trainingos.ingestion.fit.MAX_ZIP_MEMBER_BYTES", 1024):
+            with self.assertRaises(SyncError) as cm:
+                ManualFitAdapter((zip_path,))
+        self.assertEqual("fit_zip_member_too_large", cm.exception.code)
+        self.assertNotIn("nested.zip", str(cm.exception))
+        self.assertNotIn("1025", str(cm.exception))
+
     # --- total uncompressed size ---
 
     def test_zip_fit_members_within_individual_limit_but_total_exceeded_raises_sync_error(self) -> None:

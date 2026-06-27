@@ -314,6 +314,8 @@ def _extract_fit_members(
         if lower_name.endswith(".zip"):
             if depth >= MAX_ZIP_NESTING_DEPTH:
                 raise SyncError("fit_zip_depth_exceeded", "FIT zip nesting depth exceeded")
+            if member.file_size > MAX_ZIP_MEMBER_BYTES:
+                raise SyncError("fit_zip_member_too_large", "FIT zip member is too large")
             state.summary.nested_zip_count += 1
             try:
                 content = archive.read(member)
