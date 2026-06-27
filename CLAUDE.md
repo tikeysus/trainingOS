@@ -2,9 +2,8 @@
 
 ## Product
 
-TrainingOS is a local-first personal running intelligence platform and long-term
-data warehouse. Its primary use case is marathon training toward a 3:10 goal
-(current PR 3:23; target race: Hamilton Marathon).
+TrainingOS: local-first running intelligence platform. Goal: sub-3:10 marathon
+(current PR 3:23, target: Hamilton Marathon).
 
 The product must help answer:
 
@@ -20,9 +19,8 @@ Data flow:
 
 `sources -> nightly sync -> SQLite -> derived metrics -> retrieval -> UI/coach`
 
-- Keep all durable data local. Dashboard and coach queries must never require
-  live Garmin, Strava, weather, or LLM-provider calls for stored facts.
-- Treat source services as replaceable adapters, not domain dependencies.
+- Keep all durable data local; never require live Garmin, Strava, weather, or
+  LLM calls for stored facts. Treat source services as replaceable adapters.
 - Preserve raw source payloads/FIT files when practical; normalize into SQLite.
 - Make sync jobs incremental, idempotent, resumable, and auditable.
 - Record source, external ID, sync time, timezone, units, and metric provenance.
@@ -49,8 +47,8 @@ optional adapters. Manual exports/imports must remain viable fallbacks.
 - Define stable internal domain models before shaping code around vendor APIs.
 - Isolate LLM and embedding providers behind interfaces configurable for
   OpenAI, Anthropic, Gemini, Ollama, or local alternatives.
-- Store the evidence used for summaries and projections. Never present an
-  opaque score without its inputs, formula/version, and applicable caveats.
+- Store the evidence behind every summary and projection; always expose inputs,
+  formula version, and caveats — never an opaque score.
 - Use explicit units and timezone-aware timestamps. Avoid silent conversions.
 - Protect credentials and personal health/location data; never commit secrets.
 - Prefer deterministic code for calculations. Use LLMs for explanation and
@@ -67,30 +65,23 @@ optional adapters. Manual exports/imports must remain viable fallbacks.
 
 ## Context and Evidence Budget
 
-TrainingOS may store years of activities, notes, weather, health data, and
-derived metrics in SQLite. Stored local data is not the limiting factor; the
-limiting factor is the amount of retrieved evidence used in one coach answer.
-
-Default coach answers should target about 20k tokens of active evidence. As a
-rough guide, that is approximately:
+Default coach answers target ~20k tokens of active evidence:
 
 - 100-200 short preference or context notes.
 - 50-100 summarized activities.
 - 20-40 detailed activity or week summaries.
 
-Do not send raw Garmin, Strava, or FIT history wholesale to an LLM. Retrieve and
-synthesize compact local evidence documents such as activity summaries, weekly
-summaries, block summaries, note summaries, metric evidence, caveats, and data
-gaps.
+Retrieve and synthesize compact local evidence (activity/weekly/block summaries,
+notes, metric evidence, caveats, data gaps) — never send raw source history
+wholesale to an LLM.
 
 For broad questions such as race readiness, the coach should search the full
 local history but include only the most relevant evidence, such as recent weekly
 summaries, the current block, comparable prior blocks, key workouts, races,
 recovery trends, and relevant notes.
 
-The user should never see a generic context-window failure. When evidence is
-constrained, the coach must say what was considered, what was included, what was
-omitted, and how that affects confidence. Examples:
+When evidence is constrained, the coach must state what was considered,
+included, omitted, and how that affects confidence. Examples:
 
 - Evidence overflow: "I found 430 matching activities and used the 80 most
   relevant."
@@ -98,10 +89,6 @@ omitted, and how that affects confidence. Examples:
   current block or a prior PR buildup would improve precision."
 - Data insufficiency: "Confidence is low because HRV and sleep are missing for
   11 of the last 14 days."
-
-Coach responses should disclose evidence scope in tangible terms when useful,
-for example: "I used 42 of 780 activities, 12 weekly summaries, and 8 notes most
-relevant to this question."
 
 ## Initial Delivery Priorities
 
@@ -114,9 +101,11 @@ relevant to this question."
 
 ## Engineering Expectations
 
-- Follow existing project conventions once established; keep changes scoped.
 - Add tests for parsers, sync idempotency, migrations, metric formulas, and
   provider contracts. Use realistic fixtures with personal data removed.
 - Document assumptions for physiological formulas and race predictions.
 - Do not add infrastructure, abstractions, or cloud dependencies without a
   demonstrated need.
+- Do not use Linear for issue tracking, planning, or task management; redirect
+  any workflow that would create a Linear issue to GitHub Issues or a local
+  document.
