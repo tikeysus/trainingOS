@@ -93,6 +93,7 @@ def create_server(
                 payload = self._read_json()
                 question = _required_text(payload.get("question"), "question")
                 evidence_limit = _optional_evidence_limit(payload.get("evidence_limit"))
+                token_budget = _optional_token_budget(payload.get("token_budget"))
             except ValueError as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
@@ -101,6 +102,7 @@ def create_server(
                     connection,
                     provider,
                     evidence_limit=evidence_limit or DEFAULT_EVIDENCE_LIMIT,
+                    token_budget=token_budget,
                 )
                 answer = service.answer(question)
             self._send_json(HTTPStatus.OK, coach_answer_to_json(answer))
@@ -203,6 +205,16 @@ def _optional_evidence_limit(value: object) -> int | None:
         raise ValueError("evidence_limit must be a positive integer")
     if value <= 0:
         raise ValueError("evidence_limit must be a positive integer")
+    return value
+
+
+def _optional_token_budget(value: object) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int):
+        raise ValueError("token_budget must be a positive integer")
+    if value <= 0:
+        raise ValueError("token_budget must be a positive integer")
     return value
 
 
