@@ -148,6 +148,177 @@ class CoachWebTests(unittest.TestCase):
         self.assertNotIn("base_url", payload["provider"])
         self.assertNotIn("available_models", payload["provider"])
 
+    def test_api_accepts_token_budget_parameter(self) -> None:
+        payload = self._post_json(
+            "/api/coach",
+            {"question": "How was my weekly distance?", "token_budget": 50},
+        )
+
+        self.assertEqual("Local coach answer from API.", payload["answer"])
+        self.assertEqual(1, len(self.provider.requests))
+
+    def test_api_token_budget_truncates_evidence_when_exceeded(self) -> None:
+        with connect_database(self.database_path) as connection:
+            for index in range(1, 4):
+                connection.execute(
+                    """
+                    INSERT INTO records (
+                        record_id, record_type, timezone, created_at, updated_at,
+                        provenance_kind, method_name, method_version
+                    )
+                    VALUES (?, 'week', 'America/Toronto',
+                            '2026-11-09T12:00:00+00:00',
+                            '2026-11-09T12:00:00+00:00',
+                            'computed', 'test_fixture', '1.0.0')
+                    """,
+                    (f"week-truncate-{index}",),
+                )
+                body = "Weekly distance evidence: 64 km. " * 25
+                connection.execute(
+                    """
+                    INSERT INTO retrieval_documents (
+                        document_id, document_type, source_record_id, source_updated_at,
+                        title, body, metadata_json, evidence_json, caveats_json,
+                        document_version, generated_at, stale_reason
+                    )
+                    VALUES (?, 'week', ?, '2026-11-09T12:00:00+00:00',
+                            'Week', ?, '{}', '[]', '[]',
+                            '1.0.0', '2026-11-09T12:00:00+00:00', NULL)
+                    """,
+                    (f"doc-week-truncate-{index}", f"week-truncate-{index}", body),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO retrieval_document_fts (document_id, title, body)
+                    VALUES (?, 'Week', ?)
+                    """,
+                    (f"doc-week-truncate-{index}", body),
+                )
+            connection.commit()
+
+        payload = self._post_json(
+            "/api/coach",
+            {"question": "weekly distance", "token_budget": 100},
+        )
+
+        self.assertGreater(len(payload["evidence"]), 0)
+        self.assertLess(len(payload["evidence"]), 3)
+        self.assertIn("matching local evidence was truncated by evidence budget", payload["caveats"])
+
+    def test_api_validates_token_budget_parameter(self) -> None:
+        zero_budget = self._post_json_error(
+            "/api/coach",
+            {"question": "weekly distance", "token_budget": 0},
+        )
+        negative_budget = self._post_json_error(
+            "/api/coach",
+            {"question": "weekly distance", "token_budget": -10},
+        )
+        invalid_type = self._post_json_error(
+            "/api/coach",
+            {"question": "weekly distance", "token_budget": "not_an_int"},
+        )
+
+        self.assertIn("token_budget", zero_budget["error"])
+        self.assertIn("token_budget", negative_budget["error"])
+        self.assertIn("token_budget", invalid_type["error"])
+
+    def test_api_token_budget_discloses_omitted_documents_in_prompt(self) -> None:
+        with connect_database(self.database_path) as connection:
+            for index in range(1, 4):
+                connection.execute(
+                    """
+                    INSERT INTO records (
+                        record_id, record_type, timezone, created_at, updated_at,
+                        provenance_kind, method_name, method_version
+                    )
+                    VALUES (?, 'week', 'America/Toronto',
+                            '2026-11-09T12:00:00+00:00',
+                            '2026-11-09T12:00:00+00:00',
+                            'computed', 'test_fixture', '1.0.0')
+                    """,
+                    (f"week-omit-{index}",),
+                )
+                body = "Weekly distance evidence: 64 km marathon. " * 15
+                connection.execute(
+                    """
+                    INSERT INTO retrieval_documents (
+                        document_id, document_type, source_record_id, source_updated_at,
+                        title, body, metadata_json, evidence_json, caveats_json,
+                        document_version, generated_at, stale_reason
+                    )
+                    VALUES (?, 'week', ?, '2026-11-09T12:00:00+00:00',
+                            'Week', ?, '{}', '[]', '[]',
+                            '1.0.0', '2026-11-09T12:00:00+00:00', NULL)
+                    """,
+                    (f"doc-week-omit-{index}", f"week-omit-{index}", body),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO retrieval_document_fts (document_id, title, body)
+                    VALUES (?, 'Week', ?)
+                    """,
+                    (f"doc-week-omit-{index}", body),
+                )
+            connection.commit()
+
+        payload = self._post_json(
+            "/api/coach",
+            {"question": "weekly distance", "token_budget": 80},
+        )
+
+        self.assertGreater(len(self.provider.requests), 0)
+        prompt = self.provider.requests[0].messages[1].content
+        self.assertIn("Omitted:", prompt)
+        self.assertIn("More matching local documents existed but were omitted by budget", prompt)
+
+    def test_api_token_budget_none_includes_all_evidence(self) -> None:
+        with connect_database(self.database_path) as connection:
+            for index in range(1, 4):
+                connection.execute(
+                    """
+                    INSERT INTO records (
+                        record_id, record_type, timezone, created_at, updated_at,
+                        provenance_kind, method_name, method_version
+                    )
+                    VALUES (?, 'week', 'America/Toronto',
+                            '2026-11-09T12:00:00+00:00',
+                            '2026-11-09T12:00:00+00:00',
+                            'computed', 'test_fixture', '1.0.0')
+                    """,
+                    (f"week-none-{index}",),
+                )
+                body = "Weekly distance evidence: 64 km. " * 5
+                connection.execute(
+                    """
+                    INSERT INTO retrieval_documents (
+                        document_id, document_type, source_record_id, source_updated_at,
+                        title, body, metadata_json, evidence_json, caveats_json,
+                        document_version, generated_at, stale_reason
+                    )
+                    VALUES (?, 'week', ?, '2026-11-09T12:00:00+00:00',
+                            'Week', ?, '{}', '[]', '[]',
+                            '1.0.0', '2026-11-09T12:00:00+00:00', NULL)
+                    """,
+                    (f"doc-week-none-{index}", f"week-none-{index}", body),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO retrieval_document_fts (document_id, title, body)
+                    VALUES (?, 'Week', ?)
+                    """,
+                    (f"doc-week-none-{index}", body),
+                )
+            connection.commit()
+
+        payload = self._post_json(
+            "/api/coach",
+            {"question": "weekly distance"},
+        )
+
+        self.assertGreaterEqual(len(payload["evidence"]), 3)
+        self.assertNotIn("matching local evidence was truncated by evidence budget", payload["caveats"])
+
     def _post_json(self, path: str, payload: dict[str, object]) -> dict[str, object]:
         request = urllib.request.Request(
             f"{self.base_url}{path}",
