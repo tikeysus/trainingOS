@@ -1,14 +1,22 @@
-"""Garmin source adapter seam without a live client dependency."""
+"""Garmin source adapter seam and concrete garminconnect client."""
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
-from trainingos.ingestion.sync import SyncPage, SyncRecord
+from trainingos.ingestion.sync import SyncError, SyncPage, SyncRecord
 
 GARMIN_SOURCE = "garmin"
+GARMIN_EMAIL_ENV = "TRAININGOS_GARMIN_EMAIL"
+GARMIN_PASSWORD_ENV = "TRAININGOS_GARMIN_PASSWORD"
+
+try:
+    from garminconnect import Garmin
+except ImportError:
+    Garmin = None  # type: ignore[assignment,misc]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +44,51 @@ class GarminClient(Protocol):
         cursor: str | None,
         limit: int,
     ) -> GarminActivityPage: ...
+
+
+class GarminConnectClient:
+    """Concrete GarminClient backed by the garminconnect library."""
+
+    def __init__(self) -> None:
+        email = os.environ.get(GARMIN_EMAIL_ENV, "")
+        password = os.environ.get(GARMIN_PASSWORD_ENV, "")
+        if not email:
+            raise ValueError(f"{GARMIN_EMAIL_ENV} must be set and non-empty")
+        if not password:
+            raise ValueError(f"{GARMIN_PASSWORD_ENV} must be set and non-empty")
+        try:
+            self._garmin = Garmin(email, password)
+            self._garmin.login()
+        except Exception as exc:
+            raise SyncError(
+                "auth_failed",
+                "Garmin authentication failed",
+                retryable=True,
+            ) from exc
+
+    def fetch_activity_summaries(
+        self,
+        cursor: str | None,
+        limit: int,
+    ) -> GarminActivityPage:
+        raw: list[dict] = self._garmin.get_activities(0, limit)
+        activities = tuple(self._map(a) for a in raw)
+        return GarminActivityPage(activities=activities, done=len(raw) < limit)
+
+    def _map(self, raw: dict) -> GarminActivitySummary:
+        if "activityId" not in raw:
+            raise SyncError("missing_activity_id", "Garmin activity missing activityId")
+        if "lastModified" not in raw:
+            raise SyncError("missing_timestamp", "Garmin activity missing lastModified")
+        external_id = str(raw["activityId"])
+        updated_at = datetime.strptime(
+            raw["lastModified"], "%Y-%m-%d %H:%M:%S"
+        ).replace(tzinfo=UTC)
+        return GarminActivitySummary(
+            external_id=external_id,
+            updated_at=updated_at,
+            payload=raw,
+        )
 
 
 class GarminActivityAdapter:
