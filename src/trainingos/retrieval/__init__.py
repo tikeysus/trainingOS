@@ -313,6 +313,9 @@ def _week_documents(connection: sqlite3.Connection) -> Iterable[RetrievalDocumen
         )
 
 
+_HEALTH_NOTE_KINDS = frozenset({"illness", "injury"})
+
+
 def _note_documents(connection: sqlite3.Connection) -> Iterable[RetrievalDocument]:
     rows = connection.execute(
         """
@@ -330,6 +333,10 @@ def _note_documents(connection: sqlite3.Connection) -> Iterable[RetrievalDocumen
             f"Note text: {row['note_text']}.",
             "Provenance: user entered.",
         ]
+        if row["note_kind"] in _HEALTH_NOTE_KINDS:
+            lines.append(
+                "This health note relates to illness injury recovery rehabilitation and wellbeing."
+            )
         if links:
             lines.append("Linked records: " + "; ".join(links) + ".")
         yield _document(
