@@ -65,14 +65,15 @@ class ManualFitAdapter:
         for source_index, path in enumerate(paths, start=1):
             resolved = path.expanduser().absolute()
             if resolved.is_dir():
-                files.extend(
-                    FitImportPayload(path=candidate, source_path=str(candidate))
-                    for candidate in sorted(
-                        candidate
-                        for candidate in resolved.rglob("*")
-                        if candidate.is_file() and candidate.suffix.lower() == ".fit"
+                for candidate in sorted(
+                    c
+                    for c in resolved.rglob("*")
+                    if c.is_file() and c.suffix.lower() == ".fit"
+                ):
+                    digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+                    files.append(
+                        FitImportPayload(path=candidate, source_path=f"sha256:{digest}")
                     )
-                )
             elif resolved.suffix.lower() == ".zip":
                 files.extend(
                     _extract_zip_fit_payloads(
@@ -82,7 +83,10 @@ class ManualFitAdapter:
                     )
                 )
             else:
-                files.append(FitImportPayload(path=resolved, source_path=str(resolved)))
+                digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+                files.append(
+                    FitImportPayload(path=resolved, source_path=f"sha256:{digest}")
+                )
         self._payloads = tuple(_deduplicate_payloads(files))
 
     def fetch(
