@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from trainingos.domain import (
     Activity,
@@ -15,6 +15,7 @@ from trainingos.domain import (
     Measurement,
     MetricStatus,
     MetricValue,
+    NoteKind,
     ProvenanceKind,
     RecordMetadata,
     SourceReference,
@@ -182,6 +183,63 @@ class NormalizationStore:
                 for linked_record_id in note.linked_record_ids
             ),
         )
+
+    def delete_context_note(self, record_id: str) -> bool:
+        row = self._connection.execute(
+            "SELECT 1 FROM context_notes WHERE record_id = ?", (record_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        self._connection.execute(
+            "DELETE FROM context_note_links WHERE note_id = ?", (record_id,)
+        )
+        self._connection.execute(
+            "DELETE FROM context_notes WHERE record_id = ?", (record_id,)
+        )
+        self._connection.execute(
+            "DELETE FROM records WHERE record_id = ?", (record_id,)
+        )
+        return True
+
+    def list_context_notes(
+        self,
+        *,
+        kind: NoteKind | None = None,
+        since: date | None = None,
+    ) -> list[dict[str, object]]:
+        kind_val = None if kind is None else kind.value
+        since_str = None if since is None else since.isoformat()
+        rows = self._connection.execute(
+            """
+            SELECT note.record_id, note.occurred_at, note.note_kind, note.note_text
+            FROM context_notes AS note
+            WHERE (? IS NULL OR note.note_kind = ?)
+              AND (? IS NULL OR date(note.occurred_at) >= ?)
+            ORDER BY note.occurred_at DESC, note.record_id DESC
+            """,
+            (kind_val, kind_val, since_str, since_str),
+        ).fetchall()
+        result = []
+        for row in rows:
+            links = self._connection.execute(
+                """
+                SELECT linked_record_id
+                FROM context_note_links
+                WHERE note_id = ?
+                ORDER BY linked_record_id
+                """,
+                (row["record_id"],),
+            ).fetchall()
+            result.append(
+                {
+                    "record_id": row["record_id"],
+                    "date": row["occurred_at"][:10],
+                    "type": row["note_kind"],
+                    "body": row["note_text"],
+                    "linked_record_ids": [r["linked_record_id"] for r in links],
+                }
+            )
+        return result
 
     def upsert_weather_observation(
         self,

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 from dataclasses import asdict
+from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -12,9 +14,25 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from trainingos.config import AppConfig
+from trainingos.domain import (
+    ContextNote,
+    NoteKind,
+    Provenance,
+    ProvenanceKind,
+    RecordMetadata,
+)
+from trainingos.normalization import NormalizationStore
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
 from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, check_ollama_health
 from trainingos.storage import connect_database
+
+_NOTES_TYPES: dict[str, NoteKind] = {
+    "illness": NoteKind.ILLNESS,
+    "injury": NoteKind.INJURY,
+    "travel": NoteKind.TRAVEL,
+    "stress": NoteKind.STRESS,
+    "note": NoteKind.GENERAL,
+}
 
 MAX_REQUEST_BYTES = 65536
 
@@ -38,6 +56,22 @@ def create_server(
     class TrainingOSCoachHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/api/notes":
+                type_filter = parse_qs(parsed.query).get("type", [None])[0]
+                kind: NoteKind | None = None
+                if type_filter is not None:
+                    if type_filter not in _NOTES_TYPES:
+                        self._send_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {"error": f"unknown note type: {type_filter!r}"},
+                        )
+                        return
+                    kind = _NOTES_TYPES[type_filter]
+                with connect_database(database_path) as connection:
+                    store = NormalizationStore(connection)
+                    notes = store.list_context_notes(kind=kind)
+                self._send_json(HTTPStatus.OK, notes)
+                return
             if parsed.path == "/api/health":
                 try:
                     self._send_json(HTTPStatus.OK, _health_payload(database_path, provider_health))
@@ -56,6 +90,52 @@ def create_server(
             self.wfile.write(body)
 
         def do_POST(self) -> None:
+            if self.path == "/api/notes":
+                try:
+                    payload = self._read_json()
+                    note_type = _required_text(payload.get("type"), "type")
+                    body_text = _required_text(payload.get("body"), "body")
+                    if note_type not in _NOTES_TYPES:
+                        raise ValueError(f"unknown note type: {note_type!r}")
+                    note_kind = _NOTES_TYPES[note_type]
+                    date_str = payload.get("date")
+                    if date_str is not None:
+                        try:
+                            parsed_date = datetime.strptime(str(date_str), "%Y-%m-%d")
+                        except ValueError:
+                            raise ValueError(f"date must be YYYY-MM-DD, got {date_str!r}")
+                        occurred_at = datetime(
+                            parsed_date.year, parsed_date.month, parsed_date.day,
+                            tzinfo=UTC,
+                        )
+                    else:
+                        today = datetime.now(UTC)
+                        occurred_at = datetime(
+                            today.year, today.month, today.day, tzinfo=UTC
+                        )
+                except ValueError as error:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                    return
+                now = datetime.now(UTC)
+                record_id = f"note:{uuid.uuid4()}"
+                note = ContextNote(
+                    metadata=RecordMetadata(
+                        record_id=record_id,
+                        timezone="UTC",
+                        created_at=now,
+                        updated_at=now,
+                        provenance=Provenance(ProvenanceKind.USER_ENTERED),
+                    ),
+                    occurred_at=occurred_at,
+                    kind=note_kind,
+                    text=body_text,
+                )
+                with connect_database(database_path) as connection:
+                    store = NormalizationStore(connection)
+                    store.upsert_context_note(note)
+                    connection.commit()
+                self._send_json(HTTPStatus.OK, {"record_id": record_id})
+                return
             if self.path != "/api/coach":
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
@@ -75,8 +155,34 @@ def create_server(
                 answer = service.answer(question)
             self._send_json(HTTPStatus.OK, coach_answer_to_json(answer))
 
+        def do_DELETE(self) -> None:
+            parsed = urlparse(self.path)
+            if not parsed.path.startswith("/api/notes/"):
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                return
+            record_id = parsed.path[len("/api/notes/"):]
+            if not record_id:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                return
+            with connect_database(database_path) as connection:
+                store = NormalizationStore(connection)
+                found = store.delete_context_note(record_id)
+                if found:
+                    connection.commit()
+            if not found:
+                self._send_json(
+                    HTTPStatus.NOT_FOUND, {"error": f"note not found: {record_id}"}
+                )
+                return
+            self._send_no_content()
+
         def log_message(self, format: str, *args: object) -> None:
             return
+
+        def _send_no_content(self) -> None:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def _read_json(self) -> dict[str, Any]:
             content_length = self.headers.get("Content-Length")
@@ -99,7 +205,7 @@ def create_server(
                 raise ValueError("request body must be a JSON object")
             return payload
 
-        def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
+        def _send_json(self, status: HTTPStatus, payload: Any) -> None:
             body = json.dumps(payload, sort_keys=True).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -304,6 +410,22 @@ __HEADING__
     <section id="scope" hidden>
       <div class="meta" id="scope-text"></div>
     </section>
+    <section id="notes-panel">
+      <h2>Context Notes</h2>
+      <form id="notes-form">
+        <select id="notes-type" name="type">
+          <option value="illness">illness</option>
+          <option value="injury">injury</option>
+          <option value="travel">travel</option>
+          <option value="stress">stress</option>
+          <option value="note">note</option>
+        </select>
+        <input type="date" id="notes-date" name="date" />
+        <textarea id="notes-body" name="body" placeholder="What happened?"></textarea>
+        <button type="submit">Save note</button>
+      </form>
+      <div id="notes-list"></div>
+    </section>
   </main>
   <script>
     const form = document.getElementById("coach-form");
@@ -347,6 +469,37 @@ __HEADING__
         submit.disabled = false;
       }
     });
+
+    const notesForm = document.getElementById("notes-form");
+    const notesList = document.getElementById("notes-list");
+
+    async function loadNotes() {
+      const res = await fetch("/api/notes");
+      const notes = await res.json();
+      notesList.innerHTML = notes.map(n =>
+        `<div class="meta">${n.date} [${n.type}] ${n.body}</div>`
+      ).join("");
+    }
+
+    notesForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const formData = new FormData(notesForm);
+      const payload = {
+        type: formData.get("type"),
+        body: formData.get("body"),
+      };
+      const dateVal = formData.get("date");
+      if (dateVal) payload.date = dateVal;
+      await fetch("/api/notes", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      notesForm.reset();
+      loadNotes();
+    });
+
+    loadNotes();
   </script>
 </body>
 </html>

@@ -13,7 +13,9 @@ from trainingos.config import DATABASE_PATH_ENV, AppConfig
 from trainingos.domain import (
     Activity,
     ActivityType,
+    ContextNote,
     Measurement,
+    NoteKind,
     Provenance,
     ProvenanceKind,
     RecordMetadata,
@@ -158,6 +160,103 @@ class RefreshTests(unittest.TestCase):
         if table not in allowed_tables:
             raise ValueError("unsupported table")
         return self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+
+class RefreshNotesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.database_path = self.root / "training.sqlite3"
+        self.connection = connect_database(self.database_path)
+        apply_migrations(self.connection)
+
+    def tearDown(self) -> None:
+        self.connection.close()
+        self.temporary_directory.cleanup()
+
+    def test_refresh_includes_illness_note_in_retrieval_documents(self) -> None:
+        store = NormalizationStore(self.connection)
+        store.upsert_context_note(
+            ContextNote(
+                metadata=RecordMetadata(
+                    record_id="note-refresh-1",
+                    timezone="America/Toronto",
+                    created_at=datetime(2026, 7, 1, tzinfo=UTC),
+                    updated_at=datetime(2026, 7, 1, tzinfo=UTC),
+                    provenance=Provenance(ProvenanceKind.USER_ENTERED),
+                ),
+                occurred_at=datetime(2026, 7, 1, 6, 0, tzinfo=UTC),
+                kind=NoteKind.ILLNESS,
+                text="Cold during taper week.",
+            )
+        )
+        self.connection.commit()
+
+        report = refresh_training_data(
+            self.connection,
+            timezone="America/Toronto",
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        self.assertGreater(report.retrieval.generated_count, 0)
+        row = self.connection.execute(
+            """
+            SELECT document_id, document_type
+            FROM retrieval_documents
+            WHERE source_record_id = 'note-refresh-1'
+            """
+        ).fetchone()
+        self.assertIsNotNone(row, "expected a retrieval document for the illness note")
+        self.assertEqual("note", row["document_type"])
+
+    def test_refresh_removes_note_retrieval_document_after_note_deleted(self) -> None:
+        store = NormalizationStore(self.connection)
+        store.upsert_context_note(
+            ContextNote(
+                metadata=RecordMetadata(
+                    record_id="note-to-delete",
+                    timezone="America/Toronto",
+                    created_at=datetime(2026, 7, 1, tzinfo=UTC),
+                    updated_at=datetime(2026, 7, 1, tzinfo=UTC),
+                    provenance=Provenance(ProvenanceKind.USER_ENTERED),
+                ),
+                occurred_at=datetime(2026, 7, 1, 6, 0, tzinfo=UTC),
+                kind=NoteKind.INJURY,
+                text="Blister on left heel.",
+            )
+        )
+        self.connection.commit()
+
+        refresh_training_data(
+            self.connection,
+            timezone="America/Toronto",
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+        self.connection.execute(
+            "DELETE FROM context_note_links WHERE note_id = 'note-to-delete'"
+        )
+        self.connection.execute(
+            "DELETE FROM context_notes WHERE record_id = 'note-to-delete'"
+        )
+        self.connection.execute(
+            "DELETE FROM records WHERE record_id = 'note-to-delete'"
+        )
+        self.connection.commit()
+
+        refresh_training_data(
+            self.connection,
+            timezone="America/Toronto",
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        row = self.connection.execute(
+            """
+            SELECT document_id
+            FROM retrieval_documents
+            WHERE source_record_id = 'note-to-delete'
+            """
+        ).fetchone()
+        self.assertIsNone(row, "retrieval document should be removed after note deletion")
 
 
 def _pythonpath_env() -> dict[str, str]:
