@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import html as _html_module
 import json
+import uuid
 from dataclasses import asdict
+from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -12,6 +15,9 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from trainingos.config import AppConfig
+from trainingos.domain import ContextNote, Provenance, ProvenanceKind, RecordMetadata
+from trainingos.normalization import NormalizationStore
+from trainingos.notes import NOTE_KIND_TYPES, NOTE_TYPE_KINDS, NOTE_TYPES
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
 from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, check_ollama_health
 from trainingos.storage import connect_database
@@ -44,6 +50,42 @@ def create_server(
                 except Exception:
                     self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"status": "error"})
                 return
+            if parsed.path == "/api/notes":
+                query = parse_qs(parsed.query)
+                type_param = query.get("type", [None])[0]
+                since_param = query.get("since", [None])[0]
+                filters: list[str] = []
+                params: list[object] = []
+                if type_param is not None and type_param in NOTE_TYPE_KINDS:
+                    filters.append("note.note_kind = ?")
+                    params.append(NOTE_TYPE_KINDS[type_param].value)
+                if since_param is not None:
+                    filters.append("date(note.occurred_at) >= ?")
+                    params.append(since_param)
+                where = ("WHERE " + " AND ".join(filters)) if filters else ""
+                with connect_database(database_path) as connection:
+                    rows = connection.execute(
+                        f"""
+                        SELECT note.record_id, note.occurred_at,
+                               note.note_kind, note.note_text
+                        FROM context_notes AS note
+                        JOIN records AS record ON record.record_id = note.record_id
+                        {where}
+                        ORDER BY note.occurred_at DESC
+                        """,
+                        tuple(params),
+                    ).fetchall()
+                notes = [
+                    {
+                        "note_id": row["record_id"],
+                        "type": NOTE_KIND_TYPES.get(row["note_kind"], row["note_kind"]),
+                        "body": _html_module.escape(row["note_text"]),
+                        "date": row["occurred_at"][:10],
+                    }
+                    for row in rows
+                ]
+                self._send_json(HTTPStatus.OK, notes)  # type: ignore[arg-type]
+                return
             if parsed.path not in {"/", "/index.html"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
@@ -56,6 +98,56 @@ def create_server(
             self.wfile.write(body)
 
         def do_POST(self) -> None:
+            if self.path == "/api/notes":
+                try:
+                    payload = self._read_json()
+                except ValueError as error:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                    return
+                try:
+                    note_type = payload.get("type")
+                    if not isinstance(note_type, str) or note_type not in NOTE_TYPE_KINDS:
+                        raise ValueError(
+                            f"type must be one of: {', '.join(NOTE_TYPES)}"
+                        )
+                    body = payload.get("body")
+                    if not isinstance(body, str) or not body.strip():
+                        raise ValueError("body must be a non-blank string")
+                    date_raw = payload.get("date")
+                    if date_raw is not None:
+                        try:
+                            occurred_at = datetime.strptime(date_raw, "%Y-%m-%d").replace(tzinfo=UTC)
+                        except (ValueError, TypeError):
+                            raise ValueError(
+                                f"date must be in YYYY-MM-DD format, got: {date_raw!r}"
+                            )
+                    else:
+                        today = datetime.now(UTC).date()
+                        occurred_at = datetime(today.year, today.month, today.day, tzinfo=UTC)
+                except ValueError as error:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                    return
+                record_id = str(uuid.uuid4())
+                now = datetime.now(UTC)
+                metadata = RecordMetadata(
+                    record_id=record_id,
+                    timezone="UTC",
+                    created_at=now,
+                    updated_at=now,
+                    provenance=Provenance(ProvenanceKind.USER_ENTERED),
+                )
+                note = ContextNote(
+                    metadata=metadata,
+                    occurred_at=occurred_at,
+                    kind=NOTE_TYPE_KINDS[note_type],
+                    text=body.strip(),
+                    linked_record_ids=(),
+                )
+                with connect_database(database_path) as connection:
+                    NormalizationStore(connection).upsert_context_note(note)
+                    connection.commit()
+                self._send_json(HTTPStatus.CREATED, {"note_id": record_id})
+                return
             if self.path != "/api/coach":
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
@@ -303,6 +395,22 @@ __HEADING__
     </section>
     <section id="scope" hidden>
       <div class="meta" id="scope-text"></div>
+    </section>
+    <section id="notes-panel">
+      <h2>Add a note</h2>
+      <form id="notes-form">
+        <select id="note-type" name="type">
+          <option value="illness">illness</option>
+          <option value="injury">injury</option>
+          <option value="travel">travel</option>
+          <option value="stress">stress</option>
+          <option value="note">note</option>
+        </select>
+        <textarea id="note-body" name="body" placeholder="Describe what happened..." required></textarea>
+        <input type="date" id="note-date" name="date">
+        <button type="submit">Save note</button>
+      </form>
+      <ul id="notes-list"></ul>
     </section>
   </main>
   <script>
