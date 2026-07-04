@@ -4,7 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
 from zoneinfo import ZoneInfo
@@ -1206,32 +1206,6 @@ class SlowWeatherAdapter:
         )
 
 
-class TimeoutWeatherAdapter:
-    """Adapter that raises a timeout error."""
-
-    source = "fixture_weather"
-
-    def __init__(self) -> None:
-        self.requests: list[WeatherRequest] = []
-
-    def fetch(self, request: WeatherRequest) -> WeatherFetchResult:
-        self.requests.append(request)
-        raise TimeoutError("weather service timeout")
-
-
-class OfflineWeatherAdapter:
-    """Adapter that simulates offline mode (no network available)."""
-
-    source = "fixture_offline_weather"
-
-    def __init__(self) -> None:
-        self.requests: list[WeatherRequest] = []
-
-    def fetch(self, request: WeatherRequest) -> WeatherFetchResult:
-        self.requests.append(request)
-        raise ConnectionError("offline: no network available")
-
-
 class BlankSourceWeatherAdapter:
     """Adapter with blank source property (for error testing)."""
 
@@ -1248,48 +1222,6 @@ class BlankSourceWeatherAdapter:
             metrics=(temperature_celsius(10.0),),
             raw_content=b'{"temperature":10.0}',
         )
-
-
-class MultiMetricWeatherAdapter:
-    """Adapter that returns weather with multiple metrics."""
-
-    source = "fixture_multi_weather"
-
-    def __init__(self, result: WeatherFetchResult | None = None) -> None:
-        self.requests: list[WeatherRequest] = []
-        self._result = result or WeatherFetchResult(
-            external_id="weather-multi",
-            observed_at=datetime(2026, 11, 1, 5, 30, tzinfo=UTC),
-            metrics=(
-                temperature_celsius(15.5, quality=0.9),
-                MetricValue(
-                    "wind_speed", Measurement(8.5, Unit.METRE_PER_SECOND), quality=0.85
-                ),
-                MetricValue(
-                    "precipitation", Measurement(2.5, Unit.MILLIMETRE), quality=0.8
-                ),
-                MetricValue("humidity", Measurement(72, Unit.PERCENT), quality=0.9),
-            ),
-            condition="partly_cloudy",
-            raw_content=b'{"temperature":15.5,"wind":8.5,"rain":2.5,"humidity":72}',
-        )
-
-    def fetch(self, request: WeatherRequest) -> WeatherFetchResult:
-        self.requests.append(request)
-        return self._result
-
-
-class MalformedResponseWeatherAdapter:
-    """Adapter that returns malformed weather data."""
-
-    source = "fixture_malformed_weather"
-
-    def __init__(self) -> None:
-        self.requests: list[WeatherRequest] = []
-
-    def fetch(self, request: WeatherRequest) -> WeatherFetchResult:
-        self.requests.append(request)
-        raise ValueError("malformed JSON from weather API")
 
 
 if __name__ == "__main__":
