@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 class Unit(StrEnum):
     METRE = "m"
     KILOMETRE = "km"
+    MILLIMETRE = "mm"
     SECOND = "s"
     METRE_PER_SECOND = "m/s"
     SECOND_PER_KILOMETRE = "s/km"
