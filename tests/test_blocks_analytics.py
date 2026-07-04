@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 import tempfile
 import unittest
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from trainingos.analytics.blocks import BlockMetricsReport, derive_block_metrics
 from trainingos.blocks import close_block, create_block, set_phase
@@ -284,6 +287,54 @@ class BlockAnalyticsTests(unittest.TestCase):
                 self._optional_metric(key),
                 msg=f"Expected metric_evidence row for '{key}'",
             )
+
+    def test_activities_in_non_overlapping_blocks_are_not_cross_attributed(self) -> None:
+        # Create block A with two runs
+        block_a_id = create_block(
+            self.connection,
+            goal="Block A",
+            start_date=date(2026, 1, 1),
+            race_date=date(2026, 3, 31),
+            now=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        )
+        self._activity("a-run-1", datetime(2026, 1, 15, 10, 0, tzinfo=UTC), 3600, 10000)
+        self._activity("a-run-2", datetime(2026, 2, 15, 10, 0, tzinfo=UTC), 3600, 15000)
+
+        # Close block A and create block B with two different runs
+        close_block(
+            self.connection,
+            now=datetime(2026, 3, 31, 12, 0, tzinfo=UTC),
+        )
+        block_b_id = create_block(
+            self.connection,
+            goal="Block B",
+            start_date=date(2026, 4, 1),
+            race_date=date(2026, 6, 30),
+            now=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+        )
+        self._activity("b-run-1", datetime(2026, 4, 15, 10, 0, tzinfo=UTC), 3600, 20000)
+        self._activity("b-run-2", datetime(2026, 5, 15, 10, 0, tzinfo=UTC), 3600, 25000)
+
+        # Derive metrics for both blocks
+        derive_block_metrics(self.connection, timezone=_TIMEZONE, now=_NOW)
+
+        # Assert block A only has its activities (10000 + 15000 = 25000)
+        metric_id_a = f"block_metric:block_total_mileage:1.0.0:{block_a_id}"
+        row_a = self.connection.execute(
+            "SELECT metric_value FROM metric_evidence WHERE record_id = ?",
+            (metric_id_a,),
+        ).fetchone()
+        self.assertIsNotNone(row_a, "No total_mileage metric for block A")
+        self.assertEqual(25000.0, row_a["metric_value"])
+
+        # Assert block B only has its activities (20000 + 25000 = 45000)
+        metric_id_b = f"block_metric:block_total_mileage:1.0.0:{block_b_id}"
+        row_b = self.connection.execute(
+            "SELECT metric_value FROM metric_evidence WHERE record_id = ?",
+            (metric_id_b,),
+        ).fetchone()
+        self.assertIsNotNone(row_b, "No total_mileage metric for block B")
+        self.assertEqual(45000.0, row_b["metric_value"])
 
     # ---- D. Edge Cases -------------------------------------------------------
 
