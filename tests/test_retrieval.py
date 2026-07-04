@@ -342,5 +342,178 @@ class RetrievalTests(unittest.TestCase):
         return [tuple(row) for row in rows]
 
 
+class NoteRetrievalDocumentTests(unittest.TestCase):
+    """Focused tests for note retrieval document generation and search."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.connection = connect_database(
+            Path(self.temporary_directory.name) / "training.sqlite3"
+        )
+        apply_migrations(self.connection)
+        self.store = NormalizationStore(self.connection)
+
+    def tearDown(self) -> None:
+        self.connection.close()
+        self.temporary_directory.cleanup()
+
+    def test_illness_note_generates_retrieval_document(self) -> None:
+        self.store.upsert_context_note(self._note("illness-1", NoteKind.ILLNESS, "Flu symptoms"))
+
+        generate_retrieval_documents(
+            self.connection,
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        row = self._document("note", "illness-1")
+        self.assertIsNotNone(row)
+        self.assertIn("illness", row["body"])
+        metadata = json.loads(row["metadata_json"])
+        self.assertEqual("illness", metadata["note_kind"])
+
+    def test_injury_note_with_activity_link_includes_link_in_evidence(self) -> None:
+        self._insert_activity("activity-1")
+        self.store.upsert_context_note(
+            self._note("injury-1", NoteKind.INJURY, "Left Achilles sore", linked_to="activity-1")
+        )
+
+        generate_retrieval_documents(
+            self.connection,
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        row = self._document("note", "injury-1")
+        self.assertIsNotNone(row)
+        evidence = json.loads(row["evidence_json"])
+        self.assertIn("activity-1", evidence)
+
+    def test_travel_note_generates_retrieval_document(self) -> None:
+        self.store.upsert_context_note(self._note("travel-1", NoteKind.TRAVEL, "Business trip to NYC"))
+
+        generate_retrieval_documents(
+            self.connection,
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        row = self._document("note", "travel-1")
+        self.assertIsNotNone(row)
+        self.assertIn("travel", row["body"])
+
+    def test_stress_note_generates_retrieval_document(self) -> None:
+        self.store.upsert_context_note(self._note("stress-1", NoteKind.STRESS, "Work deadline crunch"))
+
+        generate_retrieval_documents(
+            self.connection,
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        row = self._document("note", "stress-1")
+        self.assertIsNotNone(row)
+        self.assertIn("stress", row["body"])
+
+    def test_search_returns_note_document_on_keyword_match(self) -> None:
+        self.store.upsert_context_note(
+            self._note("illness-2", NoteKind.ILLNESS, "Flu and fever, complete rest")
+        )
+        generate_retrieval_documents(
+            self.connection,
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        results = search_retrieval_documents(self.connection, "fever")
+
+        self.assertEqual(1, len(results))
+        self.assertEqual("note", results[0].document.document_type)
+        self.assertEqual("illness-2", results[0].document.source_record_id)
+
+    def test_note_without_links_evidence_contains_only_own_record_id(self) -> None:
+        self.store.upsert_context_note(
+            self._note("note-1", NoteKind.GENERAL, "General free-form annotation")
+        )
+
+        generate_retrieval_documents(
+            self.connection,
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        row = self._document("note", "note-1")
+        evidence = json.loads(row["evidence_json"])
+        self.assertEqual(["note-1"], evidence)
+
+    def test_fts_index_is_populated_for_note_documents(self) -> None:
+        self.store.upsert_context_note(
+            self._note("illness-3", NoteKind.ILLNESS, "Gastroenteritis two days")
+        )
+        generate_retrieval_documents(
+            self.connection,
+            now=datetime(2026, 7, 3, 12, 0, tzinfo=UTC),
+        )
+
+        fts_row = self.connection.execute(
+            "SELECT document_id FROM retrieval_document_fts WHERE body MATCH 'gastroenteritis'"
+        ).fetchone()
+        self.assertIsNotNone(fts_row)
+
+    # -------------------------------------------------------------------------
+    # Helpers
+    # -------------------------------------------------------------------------
+
+    def _metadata(self, record_id: str) -> RecordMetadata:
+        return RecordMetadata(
+            record_id=record_id,
+            timezone="America/Toronto",
+            created_at=datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
+            updated_at=datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
+            provenance=Provenance(ProvenanceKind.USER_ENTERED),
+        )
+
+    def _note(
+        self,
+        record_id: str,
+        kind: NoteKind,
+        text: str,
+        *,
+        linked_to: str | None = None,
+    ) -> ContextNote:
+        return ContextNote(
+            metadata=self._metadata(record_id),
+            occurred_at=datetime(2026, 7, 1, 10, 0, tzinfo=UTC),
+            kind=kind,
+            text=text,
+            linked_record_ids=(linked_to,) if linked_to else (),
+        )
+
+    def _insert_activity(self, record_id: str) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO records (
+                record_id, record_type, timezone, created_at, updated_at, provenance_kind
+            ) VALUES (?, 'activity', 'America/Toronto',
+                      '2026-07-01T07:00:00+00:00', '2026-07-01T07:00:00+00:00',
+                      'user_entered')
+            """,
+            (record_id,),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO activities (
+                record_id, activity_type, started_at, duration_seconds, distance_metres
+            ) VALUES (?, 'run', '2026-07-01T05:30:00+00:00', 3600, 10000)
+            """,
+            (record_id,),
+        )
+        self.connection.commit()
+
+    def _document(self, document_type: str, source_record_id: str) -> sqlite3.Row | None:
+        return self.connection.execute(
+            """
+            SELECT *
+            FROM retrieval_documents
+            WHERE document_type = ? AND source_record_id = ?
+            """,
+            (document_type, source_record_id),
+        ).fetchone()
+
+
 if __name__ == "__main__":
     unittest.main()
