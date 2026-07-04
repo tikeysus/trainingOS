@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from trainingos.ingestion import (
     ManualFitHandler,
     RawArtifactStore,
     SyncError,
+    SyncOptions,
     SyncRunner,
     SyncStatus,
     parse_fit_messages,
@@ -1048,6 +1050,517 @@ class ZipDiscoveryHardeningTests(unittest.TestCase):
         self.assertEqual(4, adapter.discovery_summary.fit_count)
         self.assertEqual(1, adapter.discovery_summary.skipped_count)
         self.assertEqual(1, adapter.discovery_summary.nested_zip_count)
+
+
+class FitImportIdentityTests(unittest.TestCase):
+    """Tests for stable, privacy-preserving FIT import identity (issue #24)."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.database_path = self.root / "training.sqlite3"
+        self.raw_dir = self.root / "raw"
+        self.connection = connect_database(self.database_path)
+        apply_migrations(self.connection)
+        self.clock = lambda: datetime(2026, 6, 16, 12, 0, tzinfo=UTC)
+
+    def tearDown(self) -> None:
+        self.connection.close()
+        self.temporary_directory.cleanup()
+
+    # ── A. Happy Path ────────────────────────────────────────────────────────
+
+    def test_plain_fit_adapter_external_id_does_not_contain_local_path(self) -> None:
+        fit_path = self.root / "my_workout.fit"
+        fit_path.write_bytes(b"valid fit bytes for run on 2026-06-16")
+
+        page = ManualFitAdapter((fit_path,)).fetch(None, 100)
+
+        self.assertEqual(1, len(page.records))
+        record = page.records[0]
+        self.assertNotIn(str(self.root), record.external_id)
+        self.assertNotIn("my_workout", record.external_id)
+
+    def test_plain_fit_adapter_external_id_is_content_hash(self) -> None:
+        content = b"deterministic fit bytes for identity test"
+        fit_path = self.root / "workout.fit"
+        fit_path.write_bytes(content)
+        expected = hashlib.sha256(content).hexdigest()
+
+        page = ManualFitAdapter((fit_path,)).fetch(None, 100)
+
+        self.assertIn(expected[:16], page.records[0].external_id)
+
+    def test_directory_adapter_external_ids_do_not_contain_absolute_paths(self) -> None:
+        fit_dir = self.root / "garmin_exports"
+        fit_dir.mkdir()
+        (fit_dir / "morning_run.fit").write_bytes(b"fit bytes one for morning")
+        (fit_dir / "evening_run.fit").write_bytes(b"fit bytes two for evening")
+
+        page = ManualFitAdapter((fit_dir,)).fetch(None, 100)
+
+        self.assertEqual(2, len(page.records))
+        for record in page.records:
+            self.assertNotIn(str(self.root), record.external_id)
+            self.assertNotIn("garmin_exports", record.external_id)
+            self.assertNotIn("morning_run", record.external_id)
+            self.assertNotIn("evening_run", record.external_id)
+
+    def test_full_import_does_not_leak_path_into_source_references(self) -> None:
+        personal_dir = self.root / "Users" / "athlete" / "garmin"
+        personal_dir.mkdir(parents=True)
+        fit_path = personal_dir / "my_run.fit"
+        fit_path.write_bytes(b"personal activity fit data")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir), timezone="America/Toronto", clock=self.clock
+        )
+
+        with patch("trainingos.ingestion.fit.read_fit_messages", return_value=self._messages()):
+            runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        refs = self.connection.execute(
+            "SELECT external_id FROM source_references WHERE source = 'manual_fit'"
+        ).fetchall()
+        self.assertGreater(len(refs), 0)
+        for row in refs:
+            self.assertNotIn(str(self.root), row["external_id"])
+            self.assertNotIn("athlete", row["external_id"])
+            self.assertNotIn("my_run", row["external_id"])
+
+    # ── B. Boundary Values ───────────────────────────────────────────────────
+
+    def test_fit_identity_with_missing_time_created_falls_back_to_content_hash(self) -> None:
+        # file_id has serial but no time_created; session also has no start_time
+        content = b"fit bytes no timestamps"
+        messages = (
+            FitMessage("file_id", {"serial_number": 77777}),
+            FitMessage(
+                "session",
+                {
+                    "sport": "running",
+                    "timestamp": datetime(2026, 6, 16, 11, 0, tzinfo=UTC),
+                    "total_timer_time": 1800,
+                    "total_distance": 5000,
+                },
+            ),
+        )
+
+        parsed = parse_fit_messages(
+            messages,
+            raw_record_id="raw-1",
+            source="manual_fit",
+            fallback_external_id=f"sha256:{hashlib.sha256(content).hexdigest()}",
+            synced_at=self.clock(),
+            timezone="UTC",
+        )
+
+        self.assertTrue(
+            parsed.external_id.startswith("sha256:"),
+            f"expected content-hash fallback, got: {parsed.external_id}",
+        )
+        self.assertNotIn("77777", parsed.external_id)
+
+    def test_fit_identity_uses_session_start_time_when_file_id_lacks_time_created(self) -> None:
+        # file_id has serial but no time_created; session provides start_time as fallback
+        messages = (
+            FitMessage("file_id", {"serial_number": 55555}),
+            FitMessage(
+                "session",
+                {
+                    "sport": "running",
+                    "start_time": datetime(2026, 6, 16, 8, 0, tzinfo=UTC),
+                    "timestamp": datetime(2026, 6, 16, 9, 0, tzinfo=UTC),
+                    "total_timer_time": 3600,
+                    "total_distance": 10000,
+                },
+            ),
+        )
+
+        parsed = parse_fit_messages(
+            messages,
+            raw_record_id="raw-1",
+            source="manual_fit",
+            fallback_external_id="sha256:fallback",
+            synced_at=self.clock(),
+            timezone="UTC",
+        )
+
+        self.assertEqual("fit:55555:2026-06-16T08:00:00+00:00", parsed.external_id)
+
+    def test_directory_with_single_fit_file_produces_one_non_path_record(self) -> None:
+        fit_dir = self.root / "solo"
+        fit_dir.mkdir()
+        (fit_dir / "only.fit").write_bytes(b"solo fit bytes")
+
+        page = ManualFitAdapter((fit_dir,)).fetch(None, 100)
+
+        self.assertEqual(1, len(page.records))
+        self.assertNotIn(str(self.root), page.records[0].external_id)
+
+    def test_directory_with_no_fit_files_produces_empty_page(self) -> None:
+        empty_dir = self.root / "empty"
+        empty_dir.mkdir()
+        (empty_dir / "notes.txt").write_text("not a fit file")
+        (empty_dir / "data.json").write_text("{}")
+
+        page = ManualFitAdapter((empty_dir,)).fetch(None, 100)
+
+        self.assertEqual(0, len(page.records))
+        self.assertTrue(page.done)
+
+    # ── C. Equivalence Partitioning ──────────────────────────────────────────
+
+    def test_plain_fit_and_zip_fit_with_identical_content_share_hash(self) -> None:
+        # Both paths produce an external_id that encodes the same content hash
+        content = b"shared fit bytes no file id message"
+        plain_path = self.root / "plain.fit"
+        plain_path.write_bytes(content)
+
+        zip_path = self.root / "export.zip"
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr("member.fit", content)
+
+        plain_record = ManualFitAdapter((plain_path,)).fetch(None, 100).records[0]
+        zip_record = ManualFitAdapter((zip_path,)).fetch(None, 100).records[0]
+
+        expected_hash = hashlib.sha256(content).hexdigest()[:16]
+        self.assertIn(expected_hash, plain_record.external_id)
+        self.assertIn(expected_hash, zip_record.external_id)
+
+    def test_fit_files_with_same_device_identity_produce_same_parsed_external_id(self) -> None:
+        # Two parsings of activities with the same serial+time_created are the same identity
+        shared_time = datetime(2026, 6, 16, 10, 0, tzinfo=UTC)
+        base_fields = {
+            "sport": "running",
+            "start_time": shared_time,
+            "timestamp": shared_time,
+            "total_timer_time": 3600,
+            "total_distance": 10000,
+        }
+        messages_a = (
+            FitMessage("file_id", {"serial_number": 12345, "time_created": shared_time}),
+            FitMessage("session", base_fields),
+        )
+        messages_b = (
+            FitMessage("file_id", {"serial_number": 12345, "time_created": shared_time}),
+            FitMessage("session", {**base_fields, "total_calories": 500}),
+        )
+
+        parsed_a = parse_fit_messages(
+            messages_a, raw_record_id="r1", source="manual_fit",
+            fallback_external_id="sha256:a", synced_at=self.clock(), timezone="UTC",
+        )
+        parsed_b = parse_fit_messages(
+            messages_b, raw_record_id="r2", source="manual_fit",
+            fallback_external_id="sha256:b", synced_at=self.clock(), timezone="UTC",
+        )
+
+        self.assertEqual(parsed_a.external_id, parsed_b.external_id)
+        self.assertEqual("fit:12345:2026-06-16T10:00:00+00:00", parsed_a.external_id)
+
+    # ── D. Edge Cases ────────────────────────────────────────────────────────
+
+    def test_same_content_in_two_differently_named_files_is_deduplicated(self) -> None:
+        content = b"same content different filenames"
+        path_a = self.root / "workout_original.fit"
+        path_b = self.root / "workout_copy.fit"
+        path_a.write_bytes(content)
+        path_b.write_bytes(content)
+
+        page = ManualFitAdapter((path_a, path_b)).fetch(None, 100)
+
+        # Same content → same identity → adapter deduplicates before sync
+        self.assertEqual(1, len(page.records))
+
+    def test_same_file_moved_to_new_path_is_not_reimported(self) -> None:
+        content = b"stable fit content that will move paths"
+        path_a = self.root / "dir_a" / "workout.fit"
+        path_a.parent.mkdir()
+        path_a.write_bytes(content)
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir), timezone="America/Toronto", clock=self.clock
+        )
+
+        with patch("trainingos.ingestion.fit.read_fit_messages", return_value=self._messages()):
+            first = runner.run(ManualFitAdapter((path_a,)), handler)
+
+        path_b = self.root / "dir_b" / "renamed_workout.fit"
+        path_b.parent.mkdir()
+        path_b.write_bytes(content)
+
+        with patch("trainingos.ingestion.fit.read_fit_messages", return_value=self._messages()):
+            second = runner.run(ManualFitAdapter((path_b,)), handler)
+
+        self.assertEqual(1, first.imported_count)
+        self.assertEqual(SyncStatus.COMPLETED, second.status)
+        self.assertEqual(0, second.imported_count)
+        self.assertEqual(1, second.skipped_count)
+        self.assertEqual(1, self._count("activities"))
+
+    def test_zip_member_ordering_change_produces_same_external_ids(self) -> None:
+        content_a = b"activity fit bytes alpha version one"
+        content_b = b"activity fit bytes beta version one"
+
+        zip_ordered = self.root / "ordered.zip"
+        with zipfile.ZipFile(zip_ordered, "w") as archive:
+            archive.writestr("alpha.fit", content_a)
+            archive.writestr("beta.fit", content_b)
+
+        zip_reversed = self.root / "reversed.zip"
+        with zipfile.ZipFile(zip_reversed, "w") as archive:
+            archive.writestr("beta.fit", content_b)
+            archive.writestr("alpha.fit", content_a)
+
+        ordered_ids = {r.external_id for r in ManualFitAdapter((zip_ordered,)).fetch(None, 100).records}
+        reversed_ids = {r.external_id for r in ManualFitAdapter((zip_reversed,)).fetch(None, 100).records}
+
+        self.assertEqual(ordered_ids, reversed_ids)
+
+    def test_zip_member_filename_containing_pii_does_not_appear_in_external_id(self) -> None:
+        zip_path = self.root / "garmin-export.zip"
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr("runner@example.com_20260616.fit", b"activity bytes")
+
+        page = ManualFitAdapter((zip_path,)).fetch(None, 100)
+
+        self.assertEqual(1, len(page.records))
+        self.assertNotIn("runner@example.com", page.records[0].external_id)
+
+    def test_checkpoint_cursor_does_not_contain_absolute_path(self) -> None:
+        personal_dir = self.root / "Users" / "athlete" / "garmin"
+        personal_dir.mkdir(parents=True)
+        fit_path = personal_dir / "run.fit"
+        fit_path.write_bytes(b"personal run data")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir), timezone="America/Toronto", clock=self.clock
+        )
+
+        with patch("trainingos.ingestion.fit.read_fit_messages", return_value=self._messages()):
+            runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        checkpoint = self.connection.execute(
+            "SELECT cursor FROM sync_checkpoints WHERE source = 'manual_fit'"
+        ).fetchone()
+        self.assertIsNotNone(checkpoint)
+        self.assertNotIn("athlete", checkpoint["cursor"])
+        self.assertNotIn("garmin", checkpoint["cursor"])
+        self.assertNotIn("run.fit", checkpoint["cursor"])
+        self.assertNotIn(str(self.root), checkpoint["cursor"])
+
+    def test_sync_error_external_id_does_not_contain_local_path(self) -> None:
+        personal_dir = self.root / "Users" / "athlete" / "garmin"
+        personal_dir.mkdir(parents=True)
+        fit_path = personal_dir / "malformed.fit"
+        fit_path.write_bytes(b"not a valid fit session data")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir), timezone="UTC", clock=self.clock
+        )
+
+        with patch("trainingos.ingestion.fit.read_fit_messages", return_value=()):
+            report = runner.run(ManualFitAdapter((fit_path,)), handler)
+
+        self.assertEqual(SyncStatus.FAILED, report.status)
+        error = self.connection.execute(
+            "SELECT external_id FROM sync_errors WHERE sync_run_id = ?",
+            (report.sync_run_id,),
+        ).fetchone()
+        self.assertIsNotNone(error)
+        self.assertNotIn("athlete", error["external_id"] or "")
+        self.assertNotIn(str(self.root), error["external_id"] or "")
+        self.assertNotIn("malformed.fit", error["external_id"] or "")
+
+    def test_duplicate_paths_in_input_list_are_deduplicated(self) -> None:
+        fit_path = self.root / "workout.fit"
+        fit_path.write_bytes(b"dedup fit bytes test")
+
+        page = ManualFitAdapter((fit_path, fit_path)).fetch(None, 100)
+
+        self.assertEqual(1, len(page.records))
+
+    # ── E. Error / Negative Tests ────────────────────────────────────────────
+
+    def test_fit_identity_with_none_serial_falls_back_to_content_hash(self) -> None:
+        content = b"fit bytes with null serial number"
+        messages = (
+            FitMessage(
+                "file_id",
+                {
+                    "serial_number": None,
+                    "time_created": datetime(2026, 6, 16, 10, 0, tzinfo=UTC),
+                },
+            ),
+            FitMessage(
+                "session",
+                {
+                    "sport": "running",
+                    "start_time": datetime(2026, 6, 16, 10, 0, tzinfo=UTC),
+                    "timestamp": datetime(2026, 6, 16, 11, 0, tzinfo=UTC),
+                    "total_timer_time": 3600,
+                    "total_distance": 10000,
+                },
+            ),
+        )
+
+        parsed = parse_fit_messages(
+            messages,
+            raw_record_id="raw-1",
+            source="manual_fit",
+            fallback_external_id=f"sha256:{hashlib.sha256(content).hexdigest()}",
+            synced_at=self.clock(),
+            timezone="UTC",
+        )
+
+        self.assertTrue(
+            parsed.external_id.startswith("sha256:"),
+            f"expected sha256 fallback for None serial, got: {parsed.external_id}",
+        )
+
+    def test_zip_member_ids_stable_when_infolist_is_not_alphabetical(self) -> None:
+        # Members added in reverse alphabetical order; adapter sorts, so identities are stable
+        content_x = b"fit member x bytes unique content"
+        content_y = b"fit member y bytes unique content"
+
+        zip_path = self.root / "unordered.zip"
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr("z_second.fit", content_y)
+            archive.writestr("a_first.fit", content_x)
+
+        page = ManualFitAdapter((zip_path,)).fetch(None, 100)
+
+        self.assertEqual(2, len(page.records))
+        # Sorted alphabetically → a_first is record 0, z_second is record 1
+        self.assertIn(hashlib.sha256(content_x).hexdigest()[:16], page.records[0].external_id)
+        self.assertIn(hashlib.sha256(content_y).hexdigest()[:16], page.records[1].external_id)
+
+    # ── F. State-Based / Idempotency Tests ───────────────────────────────────
+
+    def test_repeated_import_with_path_change_skips_already_imported_content(self) -> None:
+        content = b"stable bytes that will survive a path rename"
+        path_a = self.root / "original.fit"
+        path_a.write_bytes(content)
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir), timezone="UTC", clock=self.clock
+        )
+
+        with patch("trainingos.ingestion.fit.read_fit_messages", return_value=self._messages()):
+            first = runner.run(ManualFitAdapter((path_a,)), handler)
+
+        path_b = self.root / "subdir" / "moved.fit"
+        path_b.parent.mkdir()
+        path_b.write_bytes(content)
+
+        with patch("trainingos.ingestion.fit.read_fit_messages", return_value=self._messages()):
+            second = runner.run(ManualFitAdapter((path_b,)), handler)
+
+        self.assertEqual(1, first.imported_count)
+        self.assertEqual(0, second.imported_count)
+        self.assertEqual(1, second.skipped_count)
+        self.assertEqual(1, self._count("activities"))
+
+    def test_dry_run_does_not_persist_path_metadata(self) -> None:
+        fit_path = self.root / "dry_run_workout.fit"
+        fit_path.write_bytes(b"dry run fit data bytes")
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir), timezone="UTC", clock=self.clock
+        )
+
+        with patch("trainingos.ingestion.fit.read_fit_messages", return_value=self._messages()):
+            report = runner.run(
+                ManualFitAdapter((fit_path,)),
+                handler,
+                SyncOptions(dry_run=True),
+            )
+
+        self.assertEqual(SyncStatus.COMPLETED, report.status)
+        self.assertEqual(0, self._count("raw_source_records"))
+        checkpoint = self.connection.execute(
+            "SELECT cursor FROM sync_checkpoints WHERE source = 'manual_fit'"
+        ).fetchone()
+        self.assertIsNone(checkpoint)
+
+    def test_zip_rerun_with_different_member_ordering_does_not_reimport(self) -> None:
+        content_a = b"first activity fit bytes content here"
+        content_b = b"second activity fit bytes content here"
+
+        zip_a = self.root / "export_alpha_first.zip"
+        with zipfile.ZipFile(zip_a, "w") as archive:
+            archive.writestr("alpha.fit", content_a)
+            archive.writestr("beta.fit", content_b)
+
+        zip_b = self.root / "export_beta_first.zip"
+        with zipfile.ZipFile(zip_b, "w") as archive:
+            archive.writestr("beta.fit", content_b)
+            archive.writestr("alpha.fit", content_a)
+
+        runner = SyncRunner(self.connection, clock=self.clock)
+        handler = ManualFitHandler(
+            RawArtifactStore(self.raw_dir), timezone="America/Toronto", clock=self.clock
+        )
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            side_effect=((), self._messages()),
+        ):
+            first = runner.run(ManualFitAdapter((zip_a,)), handler)
+
+        with patch(
+            "trainingos.ingestion.fit.read_fit_messages",
+            side_effect=((), self._messages()),
+        ):
+            second = runner.run(ManualFitAdapter((zip_b,)), handler)
+
+        self.assertEqual(SyncStatus.COMPLETED, first.status)
+        self.assertEqual(1, first.imported_count)
+        self.assertEqual(SyncStatus.COMPLETED, second.status)
+        self.assertEqual(0, second.imported_count)
+        self.assertEqual(2, second.skipped_count)
+        self.assertEqual(1, self._count("activities"))
+
+    def _messages(self) -> tuple[FitMessage, ...]:
+        return (
+            FitMessage(
+                "file_id",
+                {
+                    "serial_number": 12345,
+                    "time_created": datetime(2026, 6, 16, 10, 0, tzinfo=UTC),
+                },
+            ),
+            FitMessage(
+                "session",
+                {
+                    "sport": "running",
+                    "start_time": datetime(2026, 6, 16, 10, 0, tzinfo=UTC),
+                    "timestamp": datetime(2026, 6, 16, 11, 2, tzinfo=UTC),
+                    "total_timer_time": 3600,
+                    "total_distance": 10000,
+                },
+            ),
+            FitMessage(
+                "lap",
+                {
+                    "start_time": datetime(2026, 6, 16, 10, 0, tzinfo=UTC),
+                    "timestamp": datetime(2026, 6, 16, 10, 30, tzinfo=UTC),
+                    "total_timer_time": 1800,
+                    "total_distance": 5000,
+                },
+            ),
+        )
+
+    def _count(self, table: str) -> int:
+        if table not in {
+            "raw_source_records",
+            "activities",
+            "laps",
+            "activity_samples",
+        }:
+            raise ValueError("unsupported table")
+        return self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
 if __name__ == "__main__":
