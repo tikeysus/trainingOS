@@ -393,27 +393,26 @@ def _training_block_documents(
     rows = connection.execute(
         """
         SELECT record.record_id, record.updated_at, record.timezone,
-               block.name, block.start_date, block.end_date, block.target_race_id,
-               race.name AS race_name
+               block.goal, block.start_date, block.race_date, block.ended_at
         FROM training_blocks AS block
         JOIN records AS record ON record.record_id = block.record_id
-        LEFT JOIN races AS race ON race.record_id = block.target_race_id
         ORDER BY block.start_date, record.record_id
         """
     ).fetchall()
     for row in rows:
-        weeks = _block_weeks(connection, row["start_date"], row["end_date"])
+        end_date = row["race_date"] if row["race_date"] else (row["ended_at"][:10] if row["ended_at"] else None)
+        weeks = _block_weeks(connection, row["start_date"], end_date) if end_date else []
         caveats = list(_caveats(connection, row["record_id"]))
         if not weeks:
             caveats.append("no weekly summaries are available for this block")
-        if row["target_race_id"] is None:
-            caveats.append("target race is missing")
+        if not row["race_date"]:
+            caveats.append("race date is missing")
+        end_date_display = end_date or "(ongoing)"
         lines = [
-            f"Training block {row['name']} runs from {row['start_date']} to {row['end_date']} ({row['timezone']}).",
+            f"Training block {row['goal']} runs from {row['start_date']} to {end_date_display} ({row['timezone']}).",
         ]
-        if row["target_race_id"] is not None:
-            target = row["race_name"] or row["target_race_id"]
-            lines.append(f"Target race: {target}.")
+        if row["race_date"]:
+            lines.append(f"Race date: {row['race_date']}.")
         if weeks:
             lines.append("Included weeks: " + "; ".join(weeks) + ".")
         if caveats:
@@ -421,14 +420,14 @@ def _training_block_documents(
         yield _document(
             "training_block",
             row["record_id"],
-            _block_source_updated_at(connection, row["record_id"], row["start_date"], row["end_date"]),
-            f"Training block {row['name']}",
+            _block_source_updated_at(connection, row["record_id"], row["start_date"], end_date),
+            f"Training block {row['goal']}",
             lines,
             metadata={
                 "start_date": row["start_date"],
-                "end_date": row["end_date"],
+                "race_date": row["race_date"],
+                "ended_at": row["ended_at"],
                 "timezone": row["timezone"],
-                "target_race_id": row["target_race_id"],
             },
             evidence=(row["record_id"], *[week.split(" ", 1)[0] for week in weeks]),
             caveats=tuple(dict.fromkeys(caveats)),

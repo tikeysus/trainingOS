@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 from trainingos.analytics import derive_training_metrics
+from trainingos.blocks import create_block
 from trainingos.domain import (
     Activity,
     ActivitySample,
@@ -25,6 +29,7 @@ from trainingos.domain import (
 )
 from trainingos.normalization import NormalizationStore
 from trainingos.retrieval import (
+    _training_block_documents,
     generate_retrieval_documents,
     search_retrieval_documents,
 )
@@ -171,6 +176,24 @@ class RetrievalTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "limit"):
             search_retrieval_documents(self.connection, "marathon", limit=0)
+
+    # ---- D. Edge Cases ----
+
+    def test_training_block_documents_does_not_raise_after_migration_010(self) -> None:
+        from datetime import date
+
+        block_id = create_block(
+            self.connection,
+            goal="Test Block",
+            start_date=date(2026, 11, 2),
+            race_date=date(2026, 11, 9),
+            now=datetime(2026, 11, 2, 12, 0, tzinfo=UTC),
+        )
+
+        docs = list(_training_block_documents(self.connection))
+        self.assertEqual(1, len(docs))
+        self.assertEqual("training_block", docs[0].document_type)
+        self.assertEqual(block_id, docs[0].source_record_id)
 
     def _seed_training_context(self) -> None:
         self.store.upsert_activity(
