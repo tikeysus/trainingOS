@@ -15,6 +15,7 @@ class NoteKind(StrEnum):
     INJURY = "injury"
     TRAVEL = "travel"
     STRESS = "stress"
+    NOTE = "note"
     RACE = "race"
     TRAINING_BLOCK = "training_block"
     GENERAL = "general"

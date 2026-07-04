@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 from dataclasses import asdict
+from datetime import UTC, date, datetime, time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -12,9 +14,14 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from trainingos.config import AppConfig
+from trainingos.domain import ContextNote, NoteKind, Provenance, ProvenanceKind, RecordMetadata
+from trainingos.normalization import NormalizationStore
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
 from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, check_ollama_health
 from trainingos.storage import connect_database
+
+_NOTE_KINDS = ("illness", "injury", "travel", "stress", "note")
+_NOTE_KIND_MAP = {k: NoteKind(k) for k in _NOTE_KINDS}
 
 MAX_REQUEST_BYTES = 65536
 
@@ -44,6 +51,22 @@ def create_server(
                 except Exception:
                     self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"status": "error"})
                 return
+            if parsed.path == "/api/notes":
+                with connect_database(database_path) as connection:
+                    rows = connection.execute(
+                        "SELECT record_id, note_kind, note_text, occurred_at"
+                        " FROM context_notes ORDER BY occurred_at DESC"
+                    ).fetchall()
+                self._send_json(HTTPStatus.OK, [
+                    {
+                        "record_id": r["record_id"],
+                        "kind": r["note_kind"],
+                        "body": r["note_text"],
+                        "occurred_at": r["occurred_at"],
+                    }
+                    for r in rows
+                ])
+                return
             if parsed.path not in {"/", "/index.html"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
@@ -56,7 +79,40 @@ def create_server(
             self.wfile.write(body)
 
         def do_POST(self) -> None:
-            if self.path != "/api/coach":
+            if urlparse(self.path).path == "/api/notes":
+                try:
+                    payload = self._read_json()
+                    type_str = payload.get("type", "")
+                    if type_str not in _NOTE_KINDS:
+                        raise ValueError(f"type must be one of: {', '.join(_NOTE_KINDS)}")
+                    body_text = (payload.get("body") or "").strip()
+                    if not body_text:
+                        raise ValueError("body must not be blank")
+                    date_str = payload.get("date") or date.today().isoformat()
+                    occurred_at = datetime.combine(date.fromisoformat(date_str), time.min, UTC)
+                except ValueError as error:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                    return
+                record_id = str(uuid.uuid4())
+                now = datetime.now(UTC)
+                note = ContextNote(
+                    metadata=RecordMetadata(
+                        record_id=record_id,
+                        timezone="UTC",
+                        provenance=Provenance(ProvenanceKind.USER_ENTERED),
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    occurred_at=occurred_at,
+                    kind=_NOTE_KIND_MAP[type_str],
+                    text=body_text,
+                )
+                with connect_database(database_path) as connection:
+                    NormalizationStore(connection).upsert_context_note(note)
+                    connection.commit()
+                self._send_json(HTTPStatus.CREATED, {"record_id": record_id})
+                return
+            if urlparse(self.path).path != "/api/coach":
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             try:
