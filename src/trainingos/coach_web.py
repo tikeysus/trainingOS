@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 from trainingos.config import AppConfig
 from trainingos.domain import ContextNote, Provenance, ProvenanceKind, RecordMetadata
 from trainingos.normalization import NormalizationStore
-from trainingos.notes import NOTE_KIND_TYPES, NOTE_TYPE_KINDS, NOTE_TYPES
+from trainingos.notes import NOTE_KIND_TYPES, NOTE_TYPE_KINDS, NOTE_TYPES, _parse_iso_date
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
 from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, check_ollama_health
 from trainingos.storage import connect_database
@@ -60,8 +60,13 @@ def create_server(
                     filters.append("note.note_kind = ?")
                     params.append(NOTE_TYPE_KINDS[type_param].value)
                 if since_param is not None:
+                    try:
+                        since_dt = _parse_iso_date(since_param)
+                    except ValueError as error:
+                        self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                        return
                     filters.append("date(note.occurred_at) >= ?")
-                    params.append(since_param)
+                    params.append(since_dt.date().isoformat())
                 where = ("WHERE " + " AND ".join(filters)) if filters else ""
                 with connect_database(database_path) as connection:
                     rows = connection.execute(
@@ -158,13 +163,20 @@ def create_server(
             except ValueError as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
-            with connect_database(database_path) as connection:
-                service = CoachService(
-                    connection,
-                    provider,
-                    evidence_limit=evidence_limit or DEFAULT_EVIDENCE_LIMIT,
+            try:
+                with connect_database(database_path) as connection:
+                    service = CoachService(
+                        connection,
+                        provider,
+                        evidence_limit=evidence_limit or DEFAULT_EVIDENCE_LIMIT,
+                    )
+                    answer = service.answer(question)
+            except Exception:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {"error": "coach service unavailable"},
                 )
-                answer = service.answer(question)
+                return
             self._send_json(HTTPStatus.OK, coach_answer_to_json(answer))
 
         def log_message(self, format: str, *args: object) -> None:
@@ -266,7 +278,6 @@ def _health_payload(
     payload: dict[str, Any] = {
         "status": "ok",
         "database": {
-            "path": str(database_path.expanduser().absolute()),
             "retrieval_documents": 0,
         },
         "provider": {"available": None},
