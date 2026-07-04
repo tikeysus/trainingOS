@@ -185,20 +185,20 @@ class NormalizationStore:
         )
 
     def delete_context_note(self, record_id: str) -> bool:
-        row = self._connection.execute(
-            "SELECT 1 FROM context_notes WHERE record_id = ?", (record_id,)
-        ).fetchone()
-        if row is None:
-            return False
-        self._connection.execute(
-            "DELETE FROM context_note_links WHERE note_id = ?", (record_id,)
-        )
-        self._connection.execute(
-            "DELETE FROM context_notes WHERE record_id = ?", (record_id,)
-        )
-        self._connection.execute(
-            "DELETE FROM records WHERE record_id = ?", (record_id,)
-        )
+        # Use atomic DELETE that checks existence in WHERE clause
+        # This prevents race conditions where both threads pass the SELECT check
+        with self._connection:
+            result = self._connection.execute(
+                "DELETE FROM context_notes WHERE record_id = ?", (record_id,)
+            )
+            if result.rowcount == 0:
+                return False
+            self._connection.execute(
+                "DELETE FROM context_note_links WHERE note_id = ?", (record_id,)
+            )
+            self._connection.execute(
+                "DELETE FROM records WHERE record_id = ?", (record_id,)
+            )
         return True
 
     def list_context_notes(
@@ -208,35 +208,42 @@ class NormalizationStore:
         since: date | None = None,
     ) -> list[dict[str, object]]:
         kind_val = None if kind is None else kind.value
-        since_str = None if since is None else since.isoformat()
+        since_str = None if since is None else since.isoformat() + "T00:00:00"
         rows = self._connection.execute(
             """
             SELECT note.record_id, note.occurred_at, note.note_kind, note.note_text
             FROM context_notes AS note
             WHERE (? IS NULL OR note.note_kind = ?)
-              AND (? IS NULL OR date(note.occurred_at) >= ?)
+              AND (? IS NULL OR note.occurred_at >= ?)
             ORDER BY note.occurred_at DESC, note.record_id DESC
             """,
             (kind_val, kind_val, since_str, since_str),
         ).fetchall()
+
+        # Get all linked records in one query to avoid N+1 problem
+        links_rows = self._connection.execute(
+            """
+            SELECT note_id, linked_record_id
+            FROM context_note_links
+            ORDER BY note_id, linked_record_id
+            """
+        ).fetchall()
+        links_by_note: dict[str, list[str]] = {}
+        for link_row in links_rows:
+            note_id = link_row["note_id"]
+            if note_id not in links_by_note:
+                links_by_note[note_id] = []
+            links_by_note[note_id].append(link_row["linked_record_id"])
+
         result = []
         for row in rows:
-            links = self._connection.execute(
-                """
-                SELECT linked_record_id
-                FROM context_note_links
-                WHERE note_id = ?
-                ORDER BY linked_record_id
-                """,
-                (row["record_id"],),
-            ).fetchall()
             result.append(
                 {
                     "record_id": row["record_id"],
                     "date": row["occurred_at"][:10],
                     "type": row["note_kind"],
                     "body": row["note_text"],
-                    "linked_record_ids": [r["linked_record_id"] for r in links],
+                    "linked_record_ids": links_by_note.get(row["record_id"], []),
                 }
             )
         return result

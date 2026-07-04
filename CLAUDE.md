@@ -1,8 +1,5 @@
 # TrainingOS Agent Guide
 
-## Pending: Lock Down Personal Data
-Once Garmin ingestion is stable and all data is normalized into SQLite, add `var/76e88aeb-*/` to `.claudeignore` to prevent raw GDPR export files from entering context.
-
 ## Product
 
 TrainingOS: local-first running intelligence platform. 

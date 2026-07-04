@@ -219,23 +219,36 @@ class DeleteContextNoteRaceConditionTests(unittest.TestCase):
         self.store.upsert_context_note(note)
         self.connection.commit()
 
-        original_execute = self.connection.execute
-        call_count = [0]
+        class FailingConnection:
+            def __init__(self, conn):
+                self._conn = conn
 
-        def failing_execute(sql, *args, **kwargs):
-            call_count[0] += 1
-            # Fail on the DELETE FROM context_notes statement
-            if "DELETE FROM context_notes" in sql:
-                raise sqlite3.OperationalError("Injected failure")
-            return original_execute(sql, *args, **kwargs)
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
 
-        self.connection.execute = failing_execute
+            def execute(self, sql, *args, **kwargs):
+                if "DELETE FROM context_notes" in sql:
+                    raise sqlite3.OperationalError("Injected failure")
+                return self._conn.execute(sql, *args, **kwargs)
+
+            def __enter__(self):
+                self._conn.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self._conn.__exit__(*args)
+
+        failing_conn = FailingConnection(self.connection)
+        original_store_conn = self.store._connection
+        self.store._connection = failing_conn
+
         try:
             with self.assertRaises((sqlite3.OperationalError, Exception)):
                 self.store.delete_context_note("note-atomic")
         finally:
-            self.connection.execute = original_execute
-            self.connection.rollback()  # Clean up any partial state
+            self.store._connection = original_store_conn
+
+        self.connection.rollback()  # Clean up any partial state
 
         # After failure + rollback, the note should still be fully present
         note_row = self.connection.execute(
@@ -485,15 +498,26 @@ class ListContextNotesQueryEfficiencyTests(unittest.TestCase):
 
         # Capture the actual SQL executed during since filtering
         executed_sqls = []
-        original_execute = self.connection.execute
 
-        def capturing_execute(sql, *args, **kwargs):
-            executed_sqls.append(sql)
-            return original_execute(sql, *args, **kwargs)
+        class CapturingConnection:
+            def __init__(self, conn):
+                self._conn = conn
 
-        self.connection.execute = capturing_execute
-        notes = self.store.list_context_notes(since=date(2026, 7, 1))
-        self.connection.execute = original_execute
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+            def execute(self, sql, *args, **kwargs):
+                executed_sqls.append(sql)
+                return self._conn.execute(sql, *args, **kwargs)
+
+        capturing_conn = CapturingConnection(self.connection)
+        original_store_conn = self.store._connection
+        self.store._connection = capturing_conn
+
+        try:
+            notes = self.store.list_context_notes(since=date(2026, 7, 1))
+        finally:
+            self.store._connection = original_store_conn
 
         self.assertEqual(1, len(notes))
         self.assertEqual("n-on", notes[0]["record_id"])
@@ -518,18 +542,28 @@ class ListContextNotesQueryEfficiencyTests(unittest.TestCase):
 
         # Wrap the connection to count queries
         query_count = 0
-        original_execute = self.connection.execute
 
-        def counting_execute(sql, *args, **kwargs):
-            nonlocal query_count
-            query_count += 1
-            return original_execute(sql, *args, **kwargs)
+        class CountingConnection:
+            def __init__(self, conn):
+                self._conn = conn
 
-        self.connection.execute = counting_execute
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
 
-        notes = self.store.list_context_notes()
+            def execute(self, sql, *args, **kwargs):
+                nonlocal query_count
+                query_count += 1
+                return self._conn.execute(sql, *args, **kwargs)
 
-        self.connection.execute = original_execute  # Restore
+        counting_conn = CountingConnection(self.connection)
+        original_store_conn = self.store._connection
+        self.store._connection = counting_conn
+
+        try:
+            notes = self.store.list_context_notes()
+        finally:
+            self.store._connection = original_store_conn
+
         self.assertEqual(10, len(notes))
         # If N+1: would be ~11 queries (1 outer + 10 for links)
         # Fixed: should be 2-3 queries max (1 for notes + 1 for all links + overhead)
