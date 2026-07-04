@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from trainingos.analytics import derive_training_metrics
+from trainingos.blocks import create_block
 from trainingos.domain import (
     Activity,
     ActivitySample,
@@ -28,6 +29,7 @@ from trainingos.domain import (
 )
 from trainingos.normalization import NormalizationStore
 from trainingos.retrieval import (
+    _training_block_documents,
     generate_retrieval_documents,
     search_retrieval_documents,
 )
@@ -178,8 +180,6 @@ class RetrievalTests(unittest.TestCase):
     # ---- D. Edge Cases ----
 
     def test_training_block_documents_does_not_raise_after_migration_010(self) -> None:
-        from trainingos.blocks import create_block
-        from trainingos.retrieval import _training_block_documents
         from datetime import date
 
         block_id = create_block(
