@@ -19,7 +19,7 @@ from trainingos.domain import ContextNote, Provenance, ProvenanceKind, RecordMet
 from trainingos.normalization import NormalizationStore
 from trainingos.notes import NOTE_KIND_TYPES, NOTE_TYPE_KINDS, NOTE_TYPES, _parse_iso_date
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
-from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, check_ollama_health
+from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, AnthropicHealth, check_ollama_health
 from trainingos.storage import connect_database
 
 MAX_REQUEST_BYTES = 65536
@@ -39,10 +39,22 @@ def create_server(
     port: int,
     database_path: Path,
     provider: ChatProvider,
-    provider_health: Callable[[], OllamaHealth] | None = None,
+    provider_health: Callable[[], OllamaHealth | AnthropicHealth] | None = None,
+    token: str | None = None,
 ) -> HTTPServer:
     class TrainingOSCoachHandler(BaseHTTPRequestHandler):
+        def _require_auth(self) -> bool:
+            if token is None:
+                return True
+            header = self.headers.get("Authorization", "")
+            if header == f"Bearer {token}":
+                return True
+            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+            return False
+
         def do_GET(self) -> None:
+            if not self._require_auth():
+                return
             parsed = urlparse(self.path)
             if parsed.path == "/api/health":
                 try:
@@ -82,8 +94,8 @@ def create_server(
                     ).fetchall()
                 notes = [
                     {
-                        "note_id": row["record_id"],
-                        "type": NOTE_KIND_TYPES.get(row["note_kind"], row["note_kind"]),
+                        "record_id": row["record_id"],
+                        "kind": NOTE_KIND_TYPES.get(row["note_kind"], row["note_kind"]),
                         "body": _html_module.escape(row["note_text"]),
                         "date": row["occurred_at"][:10],
                     }
@@ -104,16 +116,18 @@ def create_server(
 
         def do_POST(self) -> None:
             if self.path == "/api/notes":
+                if not self._require_auth():
+                    return
                 try:
                     payload = self._read_json()
                 except ValueError as error:
                     self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                     return
                 try:
-                    note_type = payload.get("type")
-                    if not isinstance(note_type, str) or note_type not in NOTE_TYPE_KINDS:
+                    note_kind = payload.get("kind")
+                    if not isinstance(note_kind, str) or note_kind not in NOTE_TYPE_KINDS:
                         raise ValueError(
-                            f"type must be one of: {', '.join(NOTE_TYPES)}"
+                            f"kind must be one of: {', '.join(NOTE_TYPES)}"
                         )
                     body = payload.get("body")
                     if not isinstance(body, str) or not body.strip():
@@ -129,6 +143,19 @@ def create_server(
                     else:
                         today = datetime.now(UTC).date()
                         occurred_at = datetime(today.year, today.month, today.day, tzinfo=UTC)
+                    activity_id = payload.get("activity_id")
+                    linked_record_ids: tuple[str, ...] = ()
+                    if activity_id is not None:
+                        if not isinstance(activity_id, str):
+                            raise ValueError("activity_id must be a string")
+                        with connect_database(database_path) as connection:
+                            row = connection.execute(
+                                "SELECT 1 FROM records WHERE record_id = ?",
+                                (activity_id,)
+                            ).fetchone()
+                            if row is None:
+                                raise ValueError("activity_id not found")
+                        linked_record_ids = (activity_id,)
                 except ValueError as error:
                     self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                     return
@@ -144,22 +171,25 @@ def create_server(
                 note = ContextNote(
                     metadata=metadata,
                     occurred_at=occurred_at,
-                    kind=NOTE_TYPE_KINDS[note_type],
+                    kind=NOTE_TYPE_KINDS[note_kind],
                     text=body.strip(),
-                    linked_record_ids=(),
+                    linked_record_ids=linked_record_ids,
                 )
                 with connect_database(database_path) as connection:
                     NormalizationStore(connection).upsert_context_note(note)
                     connection.commit()
-                self._send_json(HTTPStatus.CREATED, {"note_id": record_id})
+                self._send_json(HTTPStatus.CREATED, {"record_id": record_id})
                 return
             if self.path != "/api/coach":
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                return
+            if not self._require_auth():
                 return
             try:
                 payload = self._read_json()
                 question = _required_text(payload.get("question"), "question")
                 evidence_limit = _optional_evidence_limit(payload.get("evidence_limit"))
+                token_budget = _optional_token_budget(payload.get("token_budget"))
             except ValueError as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
@@ -169,6 +199,7 @@ def create_server(
                         connection,
                         provider,
                         evidence_limit=evidence_limit or DEFAULT_EVIDENCE_LIMIT,
+                        token_budget=token_budget,
                     )
                     answer = service.answer(question)
             except Exception:
@@ -178,6 +209,31 @@ def create_server(
                 )
                 return
             self._send_json(HTTPStatus.OK, coach_answer_to_json(answer))
+
+        def do_DELETE(self) -> None:
+            if not self._require_auth():
+                return
+            parsed = urlparse(self.path)
+            prefix = "/api/notes/"
+            if parsed.path.startswith(prefix):
+                record_id = parsed.path[len(prefix):]
+                if not record_id:
+                    self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                    return
+                with connect_database(database_path) as connection:
+                    row = connection.execute(
+                        "SELECT 1 FROM context_notes WHERE record_id = ?", (record_id,)
+                    ).fetchone()
+                    if row is None:
+                        self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                        return
+                    connection.execute("DELETE FROM records WHERE record_id = ?", (record_id,))
+                    connection.commit()
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
         def log_message(self, format: str, *args: object) -> None:
             return
@@ -247,6 +303,7 @@ def main() -> None:
             chat_model=config.ollama_chat_model,
             timeout_seconds=min(config.ai_timeout_seconds, 5.0),
         ),
+        token=config.coach_token,
     )
     try:
         print(f"TrainingOS coach UI listening at http://{host}:{port}")
@@ -271,9 +328,19 @@ def _optional_evidence_limit(value: object) -> int | None:
     return value
 
 
+def _optional_token_budget(value: object) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int):
+        raise ValueError("token_budget must be a positive integer")
+    if value <= 0:
+        raise ValueError("token_budget must be a positive integer")
+    return value
+
+
 def _health_payload(
     database_path: Path,
-    provider_health: Callable[[], OllamaHealth] | None,
+    provider_health: Callable[[], OllamaHealth | AnthropicHealth] | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ok",
@@ -292,14 +359,22 @@ def _health_payload(
         ).fetchone()[0]
     if provider_health is not None:
         health = provider_health()
-        payload["provider"] = {
-            "provider": "ollama",
-            "base_url": health.base_url,
-            "chat_model": health.chat_model,
-            "available": health.available,
-            "available_models": list(health.available_models),
-            "error": health.error,
-        }
+        if isinstance(health, AnthropicHealth):
+            payload["provider"] = {
+                "provider": "anthropic",
+                "chat_model": health.chat_model,
+                "available": health.available,
+                "error": health.error,
+            }
+        else:
+            payload["provider"] = {
+                "provider": "ollama",
+                "base_url": health.base_url,
+                "chat_model": health.chat_model,
+                "available": health.available,
+                "available_models": list(health.available_models),
+                "error": health.error,
+            }
         if not health.available:
             payload["status"] = "degraded"
     return payload

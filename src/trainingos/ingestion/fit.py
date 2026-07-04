@@ -34,7 +34,7 @@ FIT_CONTENT_TYPE = "application/vnd.ant.fit"
 FIT_PARSER = MethodVersion("fitdecode_fit_parser", "1.0.0")
 
 MAX_ZIP_NESTING_DEPTH = 1
-MAX_ZIP_MEMBERS = 1000
+MAX_ZIP_MEMBERS = 5000
 MAX_ZIP_MEMBER_BYTES = 500 * 1024 * 1024
 MAX_ZIP_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
 

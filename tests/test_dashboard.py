@@ -227,14 +227,12 @@ class DashboardReportingTests(unittest.TestCase):
             "Prior base block",
             "2026-10-26",
             "2026-11-01",
-            None,
         )
         self._block(
             "block-current",
             "Current Hamilton build",
             "2026-11-02",
             "2026-11-08",
-            "race-current",
         )
         self._note("note-injury", "injury", "Left calf tight", "activity-current-1")
         self.connection.execute(
@@ -374,19 +372,18 @@ class DashboardReportingTests(unittest.TestCase):
     def _block(
         self,
         record_id: str,
-        name: str,
+        goal: str,
         start: str,
-        end: str,
-        target_race_id: str | None,
+        race_date: str | None,
     ) -> None:
         self._record(record_id, "training_block", "user_entered")
         self.connection.execute(
             """
             INSERT INTO training_blocks (
-                record_id, name, start_date, end_date, target_race_id
-            ) VALUES (?, ?, ?, ?, ?)
+                record_id, goal, start_date, race_date
+            ) VALUES (?, ?, ?, ?)
             """,
-            (record_id, name, start, end, target_race_id),
+            (record_id, goal, start, race_date),
         )
 
     def _note(

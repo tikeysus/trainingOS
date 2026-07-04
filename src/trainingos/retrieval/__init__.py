@@ -400,9 +400,11 @@ def _training_block_documents(
     rows = connection.execute(
         """
         SELECT record.record_id, record.updated_at, record.timezone,
-               block.goal, block.start_date, block.race_date, block.ended_at
+               block.goal, block.start_date, block.race_date, block.ended_at,
+               race.name AS race_name
         FROM training_blocks AS block
         JOIN records AS record ON record.record_id = block.record_id
+        LEFT JOIN races AS race ON DATE(race.started_at) = block.race_date
         ORDER BY block.start_date, record.record_id
         """
     ).fetchall()
@@ -419,7 +421,10 @@ def _training_block_documents(
             f"Training block {row['goal']} runs from {row['start_date']} to {end_date_display} ({row['timezone']}).",
         ]
         if row["race_date"]:
-            lines.append(f"Race date: {row['race_date']}.")
+            if row["race_name"]:
+                lines.append(f"Race: {row['race_name']} on {row['race_date']}.")
+            else:
+                lines.append(f"Race date: {row['race_date']}.")
         if weeks:
             lines.append("Included weeks: " + "; ".join(weeks) + ".")
         if caveats:

@@ -56,7 +56,7 @@ class StorageTests(unittest.TestCase):
         applied = apply_migrations(self.connection)
 
         self.assertEqual(
-            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
             [migration.version for migration in applied],
         )
         tables = {
@@ -91,6 +91,7 @@ class StorageTests(unittest.TestCase):
                 "retrieval_documents",
                 "retrieval_document_fts",
                 "race_projections",
+                "block_phase_transitions",
             }.issubset(tables)
         )
         views = {
@@ -116,7 +117,7 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(
-            10,
+            12,
             self.connection.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],

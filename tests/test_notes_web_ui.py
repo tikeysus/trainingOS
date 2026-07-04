@@ -89,10 +89,10 @@ class NotesWebUiTests(unittest.TestCase):
     def test_post_api_notes_creates_note(self) -> None:
         payload = self._post_json(
             "/api/notes",
-            {"type": "travel", "body": "Boston trip", "date": "2026-07-01"},
+            {"kind": "travel", "body": "Boston trip", "date": "2026-07-01"},
         )
 
-        self.assertIn("note_id", payload)
+        self.assertIn("record_id", payload)
         with connect_database(self.database_path) as connection:
             count = connection.execute("SELECT COUNT(*) FROM context_notes").fetchone()[0]
         self.assertEqual(1, count)
@@ -100,7 +100,7 @@ class NotesWebUiTests(unittest.TestCase):
     def test_post_api_notes_returns_201(self) -> None:
         request = urllib.request.Request(
             f"{self.base_url}/api/notes",
-            data=json.dumps({"type": "stress", "body": "Deadline week", "date": "2026-07-01"}).encode(),
+            data=json.dumps({"kind": "stress", "body": "Deadline week", "date": "2026-07-01"}).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
@@ -108,7 +108,7 @@ class NotesWebUiTests(unittest.TestCase):
             self.assertEqual(201, response.status)
 
     def test_post_api_notes_defaults_date_to_today_when_omitted(self) -> None:
-        self._post_json("/api/notes", {"type": "note", "body": "No date provided"})
+        self._post_json("/api/notes", {"kind": "note", "body": "No date provided"})
 
         with connect_database(self.database_path) as connection:
             row = connection.execute("SELECT occurred_at FROM context_notes").fetchone()
@@ -121,7 +121,7 @@ class NotesWebUiTests(unittest.TestCase):
             ("stress", "Exam week", "2026-06-15"),
             ("travel", "Race trip", "2026-07-01"),
         ]):
-            self._post_json("/api/notes", {"type": note_type, "body": body, "date": note_date})
+            self._post_json("/api/notes", {"kind": note_type, "body": body, "date": note_date})
 
         with urllib.request.urlopen(f"{self.base_url}/api/notes") as response:
             notes = json.loads(response.read().decode("utf-8"))
@@ -134,24 +134,24 @@ class NotesWebUiTests(unittest.TestCase):
         self.assertIn("2026-06-01", notes[2]["date"])
         # Each note has required fields
         for note in notes:
-            self.assertIn("note_id", note)
-            self.assertIn("type", note)
+            self.assertIn("record_id", note)
+            self.assertIn("kind", note)
             self.assertIn("body", note)
             self.assertIn("date", note)
 
     def test_get_api_notes_filters_by_type(self) -> None:
-        self._post_json("/api/notes", {"type": "illness", "body": "Flu", "date": "2026-07-01"})
-        self._post_json("/api/notes", {"type": "stress", "body": "Work", "date": "2026-07-02"})
+        self._post_json("/api/notes", {"kind": "illness", "body": "Flu", "date": "2026-07-01"})
+        self._post_json("/api/notes", {"kind": "stress", "body": "Work", "date": "2026-07-02"})
 
         with urllib.request.urlopen(f"{self.base_url}/api/notes?type=illness") as response:
             notes = json.loads(response.read().decode("utf-8"))
 
         self.assertEqual(1, len(notes))
-        self.assertEqual("illness", notes[0]["type"])
+        self.assertEqual("illness", notes[0]["kind"])
 
     def test_get_api_notes_filters_by_since(self) -> None:
-        self._post_json("/api/notes", {"type": "note", "body": "June note", "date": "2026-06-01"})
-        self._post_json("/api/notes", {"type": "note", "body": "July note", "date": "2026-07-01"})
+        self._post_json("/api/notes", {"kind": "note", "body": "June note", "date": "2026-06-01"})
+        self._post_json("/api/notes", {"kind": "note", "body": "July note", "date": "2026-07-01"})
 
         with urllib.request.urlopen(f"{self.base_url}/api/notes?since=2026-07-01") as response:
             notes = json.loads(response.read().decode("utf-8"))
@@ -163,7 +163,7 @@ class NotesWebUiTests(unittest.TestCase):
 
     def test_post_api_notes_body_with_special_html_characters_stored_literally(self) -> None:
         body = "<b>sick</b> & tired"
-        self._post_json("/api/notes", {"type": "illness", "body": body, "date": "2026-07-01"})
+        self._post_json("/api/notes", {"kind": "illness", "body": body, "date": "2026-07-01"})
 
         with connect_database(self.database_path) as connection:
             stored = connection.execute(
@@ -173,7 +173,7 @@ class NotesWebUiTests(unittest.TestCase):
 
     def test_get_api_notes_html_body_is_escaped_in_json_response(self) -> None:
         body = "<script>alert(1)</script>"
-        self._post_json("/api/notes", {"type": "note", "body": body, "date": "2026-07-01"})
+        self._post_json("/api/notes", {"kind": "note", "body": body, "date": "2026-07-01"})
 
         with urllib.request.urlopen(f"{self.base_url}/api/notes") as response:
             raw = response.read().decode("utf-8")
@@ -184,14 +184,14 @@ class NotesWebUiTests(unittest.TestCase):
     # E. Error / Negative Tests
 
     def test_post_api_notes_rejects_blank_body(self) -> None:
-        error = self._post_json_error("/api/notes", {"type": "stress", "body": "   "})
+        error = self._post_json_error("/api/notes", {"kind": "stress", "body": "   "})
 
         self.assertIn("body", error["error"].lower())
 
     def test_post_api_notes_rejects_unknown_type(self) -> None:
-        error = self._post_json_error("/api/notes", {"type": "mystery", "body": "?"})
+        error = self._post_json_error("/api/notes", {"kind": "mystery", "body": "?"})
 
-        self.assertIn("type", error["error"].lower())
+        self.assertIn("kind", error["error"].lower())
 
     def test_post_api_notes_rejects_malformed_json(self) -> None:
         request = urllib.request.Request(
@@ -208,18 +208,18 @@ class NotesWebUiTests(unittest.TestCase):
         self.assertIn("valid JSON", error["error"])
 
     def test_post_api_notes_missing_type_field_is_rejected(self) -> None:
-        error = self._post_json_error("/api/notes", {"body": "Missing type"})
+        error = self._post_json_error("/api/notes", {"body": "Missing kind"})
 
-        self.assertIn("type", error["error"].lower())
+        self.assertIn("kind", error["error"].lower())
 
     def test_post_api_notes_missing_body_field_is_rejected(self) -> None:
-        error = self._post_json_error("/api/notes", {"type": "note"})
+        error = self._post_json_error("/api/notes", {"kind": "note"})
 
         self.assertIn("body", error["error"].lower())
 
     def test_post_api_notes_invalid_date_format_rejected(self) -> None:
         error = self._post_json_error(
-            "/api/notes", {"type": "note", "body": "x", "date": "not-a-date"}
+            "/api/notes", {"kind": "note", "body": "x", "date": "not-a-date"}
         )
 
         self.assertIn("date", error["error"].lower())

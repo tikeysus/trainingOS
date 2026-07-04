@@ -73,6 +73,13 @@ class NotesWebTests(unittest.TestCase):
         self.assertIn("record_id", payload)
         self.assertIsInstance(payload["record_id"], str)
         self.assertTrue(payload["record_id"])
+        record_id = payload["record_id"]
+        with connect_database(self.database_path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM context_notes WHERE record_id = ?",
+                (record_id,),
+            ).fetchone()
+        self.assertIsNotNone(row)
 
     def test_post_api_notes_without_date_defaults_to_today(self) -> None:
         payload = self._post_notes({"kind": "note", "body": "Rest day today"})
@@ -84,7 +91,8 @@ class NotesWebTests(unittest.TestCase):
                 (record_id,),
             ).fetchone()
         occurred_date = datetime.fromisoformat(row["occurred_at"]).date().isoformat()
-        self.assertEqual("2026-07-03", occurred_date)
+        today = datetime.now(UTC).date().isoformat()
+        self.assertEqual(today, occurred_date)
 
     def test_post_api_notes_with_activity_id_creates_link(self) -> None:
         with connect_database(self.database_path) as conn:
@@ -140,6 +148,7 @@ class NotesWebTests(unittest.TestCase):
         payload = self._get_notes(params={"type": "injury"})
 
         self.assertEqual(1, len(payload))
+        self.assertIn("kind", payload[0])
         self.assertEqual("injury", payload[0]["kind"])
 
     def test_get_api_notes_with_since_filter(self) -> None:

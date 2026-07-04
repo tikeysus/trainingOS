@@ -153,7 +153,7 @@ class RetrievalTests(unittest.TestCase):
             now=datetime(2026, 11, 9, 14, 0, tzinfo=UTC),
         )
 
-        self.assertEqual(0, report.deleted_count)
+        self.assertEqual(1, report.deleted_count)
         self.assertIsNone(self._optional_document("note", "note-1"))
         self.assertEqual((), search_retrieval_documents(self.connection, "tightness"))
 
@@ -248,7 +248,7 @@ class RetrievalTests(unittest.TestCase):
             activity_id="activity-1",
         )
         self._race("race-1")
-        self._block("block-1", "race-1")
+        self._block("block-1", "2026-11-08")
         derive_training_metrics(
             self.connection,
             now=datetime(2026, 11, 9, 12, 0, tzinfo=UTC),
@@ -309,7 +309,7 @@ class RetrievalTests(unittest.TestCase):
             (record_id,),
         )
 
-    def _block(self, record_id: str, target_race_id: str) -> None:
+    def _block(self, record_id: str, race_id: str) -> None:
         self.connection.execute(
             """
             INSERT INTO records (
@@ -327,10 +327,10 @@ class RetrievalTests(unittest.TestCase):
         self.connection.execute(
             """
             INSERT INTO training_blocks (
-                record_id, name, start_date, end_date, target_race_id
-            ) VALUES (?, 'Hamilton build', '2026-11-02', '2026-11-08', ?)
+                record_id, goal, start_date, race_date
+            ) VALUES (?, 'Hamilton build', '2026-11-02', '2026-11-08')
             """,
-            (record_id, target_race_id),
+            (record_id,),
         )
 
     def _document(self, document_type: str, source_record_id: str) -> sqlite3.Row:
