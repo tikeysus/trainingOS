@@ -1,0 +1,21 @@
+# Build / cache
+.venv/
+.pytest_cache/
+**/__pycache__/
+src/trainingos.egg-info/
+
+# Personal data — binary activity files
+var/garmin_activities/
+var/garmin_fit_extract/
+var/fit-imports/
+
+# Live database (binary SQLite files — query via sqlite3 CLI instead)
+var/trainingos.sqlite3
+var/trainingos.sqlite3-shm
+var/trainingos.sqlite3-wal
+
+# Content-addressed raw data store (SHA256-named blobs, already ingested into SQLite)
+var/raw/
+
+# OS artifacts
+.DS_Store
