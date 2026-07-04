@@ -74,3 +74,72 @@ PYTHONPATH=src python3 -m trainingos.ingestion.fit_import /path/to/file-dir-or-e
 
 Successful manual FIT imports refresh derived metrics and retrieval documents
 for the same configured database.
+
+## Daily Garmin Sync
+
+Set credentials in your environment and run the daily sync pipeline manually:
+
+```sh
+export TRAININGOS_GARMIN_EMAIL=you@example.com
+export TRAININGOS_GARMIN_PASSWORD=yourpassword
+PYTHONPATH=src python3 -m trainingos.ingestion.daily_sync
+```
+
+The pipeline runs migrations, syncs new activities from Garmin Connect,
+regenerates derived metrics and retrieval documents, and copies the database
+to the Grafana runtime path if available. Exit code 0 on success, 1 on failure.
+
+### Schedule with launchd (macOS)
+
+Create `~/Library/LaunchAgents/com.trainingos.daily-sync.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.trainingos.daily-sync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-m</string>
+    <string>trainingos.ingestion.daily_sync</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/path/to/trainingOS/src</string>
+    <key>TRAININGOS_GARMIN_EMAIL</key>
+    <string>you@example.com</string>
+    <key>TRAININGOS_GARMIN_PASSWORD</key>
+    <string>yourpassword</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/tmp/trainingos-daily-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/trainingos-daily-sync.log</string>
+</dict>
+</plist>
+```
+
+Load it with:
+
+```sh
+launchctl load ~/Library/LaunchAgents/com.trainingos.daily-sync.plist
+```
+
+### Schedule with cron
+
+```sh
+# Run at 06:00 daily — edit with: crontab -e
+0 6 * * * TRAININGOS_GARMIN_EMAIL=you@example.com TRAININGOS_GARMIN_PASSWORD=yourpassword PYTHONPATH=/path/to/trainingOS/src /usr/bin/python3 -m trainingos.ingestion.daily_sync >> /tmp/trainingos-daily-sync.log 2>&1
+```
