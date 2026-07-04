@@ -12,11 +12,14 @@ from trainingos.ingestion.fit import (
     read_fit_messages,
 )
 from trainingos.ingestion.garmin import (
+    GARMIN_EMAIL_ENV,
+    GARMIN_PASSWORD_ENV,
     GARMIN_SOURCE,
     GarminActivityAdapter,
     GarminActivityPage,
     GarminActivitySummary,
     GarminClient,
+    GarminConnectClient,
 )
 from trainingos.ingestion.raw import RawArtifact, RawArtifactStore
 from trainingos.ingestion.sync import (
@@ -43,6 +46,8 @@ from trainingos.ingestion.weather import (
 
 __all__ = [
     "FIT_PARSER",
+    "GARMIN_EMAIL_ENV",
+    "GARMIN_PASSWORD_ENV",
     "GARMIN_SOURCE",
     "MANUAL_FIT_SOURCE",
     "FitImportPayload",
@@ -51,6 +56,7 @@ __all__ = [
     "GarminActivityPage",
     "GarminActivitySummary",
     "GarminClient",
+    "GarminConnectClient",
     "HistoricalWeatherAdapter",
     "ManualFitAdapter",
     "ManualFitHandler",

@@ -90,6 +90,7 @@ class StorageTests(unittest.TestCase):
                 "provenance_caveats",
                 "retrieval_documents",
                 "retrieval_document_fts",
+                "race_projections",
             }.issubset(tables)
         )
         views = {
@@ -115,7 +116,7 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(
-            9,
+            10,
             self.connection.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],
