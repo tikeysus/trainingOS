@@ -106,7 +106,10 @@ class WeatherEnricher:
         activity: Activity,
         *,
         sync_run_id: str,
-    ) -> WeatherObservation:
+        offline_mode: bool = False,
+    ) -> WeatherObservation | None:
+        if offline_mode:
+            return None
         if not self._adapter.source or not self._adapter.source.strip():
             raise ValueError("weather adapter source must not be blank")
         now = _utc(self._clock(), "weather enrichment clock")
