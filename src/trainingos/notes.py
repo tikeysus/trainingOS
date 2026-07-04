@@ -167,6 +167,7 @@ def _cmd_delete(args: argparse.Namespace, config: AppConfig) -> None:
         if row is None:
             sys.stderr.write(f"note not found: {note_id!r}\n")
             sys.exit(1)
+        connection.execute("DELETE FROM context_notes WHERE record_id = ?", (note_id,))
         connection.execute("DELETE FROM records WHERE record_id = ?", (note_id,))
         connection.commit()
 
