@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from trainingos.storage import (
     DatabaseConnectionError,
@@ -53,7 +56,7 @@ class StorageTests(unittest.TestCase):
         applied = apply_migrations(self.connection)
 
         self.assertEqual(
-            [1, 2, 3, 4, 5, 6, 7, 8, 9],
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             [migration.version for migration in applied],
         )
         tables = {
