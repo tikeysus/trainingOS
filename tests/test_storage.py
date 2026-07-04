@@ -53,7 +53,7 @@ class StorageTests(unittest.TestCase):
         applied = apply_migrations(self.connection)
 
         self.assertEqual(
-            [1, 2, 3, 4, 5, 6, 7],
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             [migration.version for migration in applied],
         )
         tables = {
@@ -87,6 +87,7 @@ class StorageTests(unittest.TestCase):
                 "provenance_caveats",
                 "retrieval_documents",
                 "retrieval_document_fts",
+                "race_projections",
             }.issubset(tables)
         )
         views = {
@@ -112,7 +113,7 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(
-            7,
+            10,
             self.connection.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0],
@@ -264,6 +265,15 @@ class StorageTests(unittest.TestCase):
                 ) VALUES ('missing', 'run', '2026-06-11T10:00:00+00:00', 3600)
                 """
             )
+
+    def test_database_ahead_of_build_is_rejected(self) -> None:
+        migrations = discover_migrations()
+        apply_migrations(self.connection, migrations)
+
+        with self.assertRaisesRegex(
+            MigrationError, "database contains migrations unavailable to this build"
+        ):
+            apply_migrations(self.connection, migrations[:-1])
 
     def test_changed_applied_migration_is_rejected(self) -> None:
         migrations = discover_migrations()
