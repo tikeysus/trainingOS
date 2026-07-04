@@ -10,6 +10,8 @@ import unittest
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 from trainingos.blocks import BlockRow, close_block, create_block, list_blocks, set_phase
 from trainingos.storage import apply_migrations, connect_database
 
@@ -498,6 +500,22 @@ class BlocksCliSubprocessTests(unittest.TestCase):
 
             self.assertNotEqual(0, result.returncode)
             self.assertNotIn("Traceback", result.stderr)
+
+    # ---- E. Error/Negative Tests (CLI) ----
+
+    def test_cli_with_no_subcommand_exits_nonzero_without_traceback(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "trainingos.blocks"],
+            cwd=Path(__file__).resolve().parents[1],
+            env=_pythonpath_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("AttributeError", result.stderr)
 
 
 def _pythonpath_env() -> dict[str, str]:
