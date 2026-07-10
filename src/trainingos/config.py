@@ -6,34 +6,23 @@ from dataclasses import dataclass
 from os import environ
 from pathlib import Path
 from typing import Mapping
-from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-AI_PROVIDER_ENV = "TRAININGOS_AI_PROVIDER"
-AI_TIMEOUT_SECONDS_ENV = "TRAININGOS_AI_TIMEOUT_SECONDS"
-ANTHROPIC_API_KEY_ENV = "TRAININGOS_ANTHROPIC_API_KEY"
-ANTHROPIC_CHAT_MODEL_ENV = "TRAININGOS_ANTHROPIC_CHAT_MODEL"
+ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
+ANTHROPIC_CHAT_MODEL_ENV = "CLAUDE_MODEL"
 COACH_ALLOW_EXTERNAL_ENV = "TRAININGOS_COACH_ALLOW_EXTERNAL"
 COACH_HOST_ENV = "TRAININGOS_COACH_HOST"
 COACH_PORT_ENV = "TRAININGOS_COACH_PORT"
 COACH_TOKEN_ENV = "TRAININGOS_COACH_TOKEN"
 DATABASE_PATH_ENV = "TRAININGOS_DB_PATH"
 LOCAL_TIMEZONE_ENV = "TRAININGOS_LOCAL_TIMEZONE"
-OLLAMA_BASE_URL_ENV = "TRAININGOS_OLLAMA_BASE_URL"
-OLLAMA_CHAT_MODEL_ENV = "TRAININGOS_OLLAMA_CHAT_MODEL"
-OLLAMA_EMBEDDING_MODEL_ENV = "TRAININGOS_OLLAMA_EMBEDDING_MODEL"
 RAW_DATA_DIR_ENV = "TRAININGOS_RAW_DATA_DIR"
 DEFAULT_DATABASE_PATH = Path(".local/share/trainingos/trainingos.sqlite3")
 DEFAULT_RAW_DATA_DIR = Path(".local/share/trainingos/raw")
-DEFAULT_AI_PROVIDER = "ollama"
 DEFAULT_AI_TIMEOUT_SECONDS = 30.0
-DEFAULT_ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-6"
+DEFAULT_ANTHROPIC_CHAT_MODEL = "claude-opus-4-1"
 DEFAULT_COACH_HOST = "127.0.0.1"
 DEFAULT_COACH_PORT = 8765
-DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_OLLAMA_CHAT_MODEL = "llama3.2"
-DEFAULT_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
-LOCAL_OLLAMA_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 PLACEHOLDER_PATH_PREFIXES = (
     "/absolute/path",
     "/path/to",
@@ -45,10 +34,6 @@ class AppConfig:
     database_path: Path
     raw_data_dir: Path
     local_timezone: str
-    ai_provider: str = DEFAULT_AI_PROVIDER
-    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
-    ollama_chat_model: str = DEFAULT_OLLAMA_CHAT_MODEL
-    ollama_embedding_model: str = DEFAULT_OLLAMA_EMBEDDING_MODEL
     ai_timeout_seconds: float = DEFAULT_AI_TIMEOUT_SECONDS
     anthropic_api_key: str | None = None
     anthropic_chat_model: str | None = None
@@ -78,41 +63,20 @@ class AppConfig:
         )
         local_timezone = values.get(LOCAL_TIMEZONE_ENV, "UTC")
         _validate_timezone(local_timezone)
-        ai_provider = values.get(AI_PROVIDER_ENV, DEFAULT_AI_PROVIDER).strip()
-        if ai_provider not in {"ollama", "anthropic"}:
+        raw_key = values.get(ANTHROPIC_API_KEY_ENV, "").strip()
+        if not raw_key:
             raise ValueError(
-                f"TRAININGOS_AI_PROVIDER must be 'ollama' or 'anthropic', got {ai_provider!r}"
+                f"{ANTHROPIC_API_KEY_ENV} is required"
             )
-        anthropic_api_key: str | None = None
-        anthropic_chat_model: str | None = None
-        if ai_provider == "anthropic":
-            raw_key = values.get(ANTHROPIC_API_KEY_ENV, "").strip()
-            if not raw_key:
-                raise ValueError(
-                    f"{ANTHROPIC_API_KEY_ENV} is required when TRAININGOS_AI_PROVIDER=anthropic"
-                )
-            anthropic_api_key = raw_key
-            anthropic_chat_model = _configured_text(
-                values,
-                ANTHROPIC_CHAT_MODEL_ENV,
-                DEFAULT_ANTHROPIC_CHAT_MODEL,
-            )
-        ollama_base_url = values.get(OLLAMA_BASE_URL_ENV, DEFAULT_OLLAMA_BASE_URL)
-        if ai_provider == "ollama":
-            _validate_local_ollama_url(ollama_base_url)
-        ollama_chat_model = _configured_text(
+        anthropic_api_key = raw_key
+        anthropic_chat_model = _configured_text(
             values,
-            OLLAMA_CHAT_MODEL_ENV,
-            DEFAULT_OLLAMA_CHAT_MODEL,
-        )
-        ollama_embedding_model = _configured_text(
-            values,
-            OLLAMA_EMBEDDING_MODEL_ENV,
-            DEFAULT_OLLAMA_EMBEDDING_MODEL,
+            ANTHROPIC_CHAT_MODEL_ENV,
+            DEFAULT_ANTHROPIC_CHAT_MODEL,
         )
         ai_timeout_seconds = _configured_timeout(
             values,
-            AI_TIMEOUT_SECONDS_ENV,
+            "TRAININGOS_AI_TIMEOUT_SECONDS",
             DEFAULT_AI_TIMEOUT_SECONDS,
         )
         coach_host = _configured_text(values, COACH_HOST_ENV, DEFAULT_COACH_HOST)
@@ -129,10 +93,6 @@ class AppConfig:
             database_path=database_path.expanduser().absolute(),
             raw_data_dir=raw_data_dir.expanduser().absolute(),
             local_timezone=local_timezone,
-            ai_provider=ai_provider,
-            ollama_base_url=ollama_base_url.rstrip("/"),
-            ollama_chat_model=ollama_chat_model,
-            ollama_embedding_model=ollama_embedding_model,
             ai_timeout_seconds=ai_timeout_seconds,
             anthropic_api_key=anthropic_api_key,
             anthropic_chat_model=anthropic_chat_model,
@@ -215,17 +175,3 @@ def _configured_port(
 
 def _is_localhost(host: str) -> bool:
     return host in {"127.0.0.1", "::1", "localhost"}
-
-
-def _validate_local_ollama_url(value: str) -> None:
-    if not value or not value.strip():
-        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must not be blank")
-    parsed = urlparse(value)
-    if parsed.scheme != "http":
-        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must use local http")
-    if parsed.hostname not in LOCAL_OLLAMA_HOSTS:
-        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must point to a local Ollama host")
-    if parsed.username or parsed.password:
-        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must not include credentials")
-    if parsed.query or parsed.fragment:
-        raise ValueError(f"{OLLAMA_BASE_URL_ENV} must not include query or fragment")
