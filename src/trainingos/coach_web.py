@@ -19,18 +19,10 @@ from trainingos.domain import ContextNote, Provenance, ProvenanceKind, RecordMet
 from trainingos.normalization import NormalizationStore
 from trainingos.notes import NOTE_KIND_TYPES, NOTE_TYPE_KINDS, NOTE_TYPES, _parse_iso_date
 from trainingos.presentation import CoachAnswer, CoachService, DEFAULT_EVIDENCE_LIMIT
-from trainingos.providers import ChatProvider, OllamaChatProvider, OllamaHealth, AnthropicHealth, check_ollama_health
+from trainingos.providers import ChatProvider, AnthropicChatProvider, AnthropicHealth, check_anthropic_health
 from trainingos.storage import connect_database
 
 MAX_REQUEST_BYTES = 65536
-
-
-def create_coach_provider(config: AppConfig) -> OllamaChatProvider:
-    return OllamaChatProvider(
-        base_url=config.ollama_base_url,
-        model=config.ollama_chat_model,
-        timeout_seconds=config.ai_timeout_seconds,
-    )
 
 
 def create_server(
@@ -39,7 +31,7 @@ def create_server(
     port: int,
     database_path: Path,
     provider: ChatProvider,
-    provider_health: Callable[[], OllamaHealth | AnthropicHealth] | None = None,
+    provider_health: Callable[[], AnthropicHealth] | None = None,
     token: str | None = None,
 ) -> HTTPServer:
     class TrainingOSCoachHandler(BaseHTTPRequestHandler):
@@ -293,14 +285,21 @@ def main() -> None:
     host = args.host or config.coach_host
     port = args.port or config.coach_port
     database_path = args.database or config.database_path
+    if not config.anthropic_api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+    provider = AnthropicChatProvider(
+        api_key=config.anthropic_api_key,
+        model=config.anthropic_chat_model or "claude-opus-4-1",
+        timeout_seconds=config.ai_timeout_seconds,
+    )
     server = create_server(
         host=host,
         port=port,
         database_path=database_path,
-        provider=create_coach_provider(config),
-        provider_health=lambda: check_ollama_health(
-            base_url=config.ollama_base_url,
-            chat_model=config.ollama_chat_model,
+        provider=provider,
+        provider_health=lambda: check_anthropic_health(
+            api_key=config.anthropic_api_key,
+            chat_model=config.anthropic_chat_model or "claude-opus-4-1",
             timeout_seconds=min(config.ai_timeout_seconds, 5.0),
         ),
         token=config.coach_token,
@@ -340,7 +339,7 @@ def _optional_token_budget(value: object) -> int | None:
 
 def _health_payload(
     database_path: Path,
-    provider_health: Callable[[], OllamaHealth | AnthropicHealth] | None,
+    provider_health: Callable[[], AnthropicHealth] | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ok",
@@ -359,22 +358,12 @@ def _health_payload(
         ).fetchone()[0]
     if provider_health is not None:
         health = provider_health()
-        if isinstance(health, AnthropicHealth):
-            payload["provider"] = {
-                "provider": "anthropic",
-                "chat_model": health.chat_model,
-                "available": health.available,
-                "error": health.error,
-            }
-        else:
-            payload["provider"] = {
-                "provider": "ollama",
-                "base_url": health.base_url,
-                "chat_model": health.chat_model,
-                "available": health.available,
-                "available_models": list(health.available_models),
-                "error": health.error,
-            }
+        payload["provider"] = {
+            "provider": "claude",
+            "chat_model": health.chat_model,
+            "available": health.available,
+            "error": health.error,
+        }
         if not health.available:
             payload["status"] = "degraded"
     return payload
