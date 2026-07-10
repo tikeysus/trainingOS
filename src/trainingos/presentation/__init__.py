@@ -335,25 +335,29 @@ def _answer_caveats(
 
 
 def _provider_recovery_guidance(error: ProviderError) -> str:
+    if error.category is ProviderErrorCategory.AUTHENTICATION:
+        return (
+            "Claude API authentication failed. Check that ANTHROPIC_API_KEY is set "
+            "to a valid API key and retry."
+        )
     if error.category is ProviderErrorCategory.PROVIDER_UNAVAILABLE:
         return (
-            "Ollama is not reachable at the configured local endpoint. Start it "
-            "with `ollama serve`, confirm `ollama list` works, then retry."
+            "Claude API is not reachable. Check your internet connection and "
+            "API key, then retry."
+        )
+    if error.category is ProviderErrorCategory.RATE_LIMIT:
+        return (
+            "Claude API rate limit reached. Your token quota will reset soon. "
+            "Try again in a moment."
         )
     if error.category is ProviderErrorCategory.TIMEOUT:
         return (
-            "The local Ollama request timed out. Try a higher "
-            "TRAININGOS_AI_TIMEOUT_SECONDS value, a smaller evidence_limit, or a "
-            "smaller local model."
-        )
-    if error.category is ProviderErrorCategory.UNSUPPORTED_CAPABILITY:
-        return (
-            "The local Ollama request was rejected. Confirm the configured model "
-            "is installed with `ollama list` or set TRAININGOS_OLLAMA_CHAT_MODEL."
+            "Claude API request timed out. Try a higher TRAININGOS_AI_TIMEOUT_SECONDS "
+            "value or a smaller evidence_limit."
         )
     return (
-        f"It failed with a {error.category.value} error. Confirm Ollama is "
-        "running locally, the configured model is installed, and retry."
+        f"Claude API failed with a {error.category.value} error. Check your "
+        "internet connection and API key, then retry."
     )
 
 
