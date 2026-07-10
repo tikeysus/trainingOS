@@ -27,11 +27,19 @@ Set `TRAININGOS_RAW_DATA_DIR` to override retained raw artifacts at
 `~/.local/share/trainingos/raw`, and `TRAININGOS_LOCAL_TIMEZONE` to choose the
 default IANA timezone for manual imports.
 
-Local coach synthesis defaults to Ollama at `http://localhost:11434`. Override
-`TRAININGOS_OLLAMA_CHAT_MODEL`, `TRAININGOS_OLLAMA_EMBEDDING_MODEL`, or
-`TRAININGOS_AI_TIMEOUT_SECONDS` to change local provider behavior.
-Start Ollama with `ollama serve` before asking coach questions, and install the
-configured chat model with `ollama pull llama3.2` if needed.
+Coach queries use Claude API. Set your API key in the environment:
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Optionally select a specific Claude model (defaults to latest):
+
+```sh
+export CLAUDE_MODEL=claude-opus-4-1
+```
+
+The coach will also accept per-query model selection via the `/api/coach` endpoint.
 
 Initialize or update the configured database with:
 

@@ -8,14 +8,13 @@
 
 ## Summary
 
-Four issues identified in security/code-quality audit. **1 CRITICAL**, **1 BUG**, **2 SHOULD FIX**. No SQL injection or command-injection vulnerabilities found.
+Three issues identified in security/code-quality audit. **1 CRITICAL**, **1 BUG**, **1 SHOULD FIX**. No SQL injection or command-injection vulnerabilities found.
 
 | # | Issue | Severity | File | Line | Test Class |
 |---|-------|----------|------|------|-----------|
 | 1 | Orphaned records in delete | 🔴 CRITICAL | `src/trainingos/notes.py` | 170 | `TestOrphanedRecordsBugFull` |
 | 2 | Unhandled coach exception | 🟠 BUG | `src/trainingos/coach_web.py` | 161–167 | `TestCoachExceptionHandlingFull` |
-| 3 | Path exposure in /api/health | 🟡 SHOULD FIX | `src/trainingos/coach_web.py` | 269 | `TestPathExposureFull` |
-| 4 | Missing date validation | 🟡 SHOULD FIX | `src/trainingos/coach_web.py` | 62–64 | `TestDateValidationFull` |
+| 3 | Missing date validation | 🟡 SHOULD FIX | `src/trainingos/coach_web.py` | 62–64 | `TestDateValidationFull` |
 
 ---
 
@@ -89,59 +88,7 @@ Expected: 4 tests pass (verify crash behavior, confirm fix returns JSON error, t
 
 ---
 
-## Issue #3: Path Exposure in `/api/health` — SHOULD FIX
-
-**File:** `src/trainingos/coach_web.py:269` in `_health_payload()`
-
-**Problem:**  
-The `/api/health` endpoint returns the full expanded filesystem path, leaking home directory, username, and exact file location:
-
-```json
-{
-  "status": "ok",
-  "database": {
-    "path": "/Users/athlete/.local/share/trainingos/trainingos.sqlite3"
-  }
-}
-```
-
-While the coach only listens on `127.0.0.1:8765`, any tool or person with local network access can query this and discover filesystem paths.
-
-**Impact:** Information disclosure (username, home directory, system configuration).
-
-**Fix (Recommended: Omit path entirely):**
-
-```python
-# Before (BUGGY)
-payload["database"] = {
-    "path": str(database_path.expanduser().absolute()),
-    "retrieval_documents": 0,
-}
-
-# After (FIXED)
-payload["database"] = {
-    "retrieval_documents": 0,
-}
-```
-
-**Alternative Fix (Mask with generic identifier):**
-```python
-payload["database"] = {
-    "path": "configured",
-    "retrieval_documents": 0,
-}
-```
-
-**Test:**
-```bash
-pytest tests/test_bugs_before_and_after.py::TestPathExposureFull -v
-```
-
-Expected: 4 tests pass (verify path is exposed, confirm fix removes it, test masked alternative)
-
----
-
-## Issue #4: Missing Date Validation in `/api/notes` GET — SHOULD FIX
+## Issue #3: Missing Date Validation in `/api/notes` GET — SHOULD FIX
 
 **File:** `src/trainingos/coach_web.py:62–64`
 
@@ -196,7 +143,7 @@ pip install -e .
 pytest tests/test_bugs_before_and_after.py -v
 ```
 
-**Expected output:** All 19 tests pass in ~2 seconds
+**Expected output:** All 14 tests pass in ~2 seconds
 
 ### Run by issue
 ```bash
@@ -207,9 +154,6 @@ pytest tests/test_bugs_before_and_after.py::TestOrphanedRecordsBugFull -v
 pytest tests/test_bugs_before_and_after.py::TestCoachExceptionHandlingFull -v
 
 # Issue #3 (SHOULD FIX)
-pytest tests/test_bugs_before_and_after.py::TestPathExposureFull -v
-
-# Issue #4 (SHOULD FIX)
 pytest tests/test_bugs_before_and_after.py::TestDateValidationFull -v
 ```
 
@@ -241,14 +185,7 @@ pytest tests/test_bugs_before_and_after.py --cov=src/trainingos --cov-report=htm
 - **test_03_fixed_exception_returns_json_error:** Verifies fixed code returns JSON error with 500 status
 - **test_04_exception_handling_edge_cases:** Verifies all exception types handled uniformly
 
-### Issue #3: Path Exposure (4 tests)
-
-- **test_01_buggy_exposes_full_path:** Verifies full path is in /api/health response
-- **test_02_buggy_leaks_username:** Verifies username can be inferred from path
-- **test_03_fixed_omits_path:** Verifies fixed code doesn't include path
-- **test_04_fixed_masked_identifier:** Verifies alternative fix with generic identifier
-
-### Issue #4: Date Validation (5 tests)
+### Issue #3: Date Validation (5 tests)
 
 - **test_01_buggy_accepts_invalid_date:** Verifies invalid dates accepted without validation
 - **test_02_buggy_sqlite_interprets_invalid_date:** Verifies SQLite produces unpredictable results
@@ -295,14 +232,7 @@ Wraps service.answer() call in try/except and returns JSON error
 response on failure instead of crashing handler. Ensures graceful
 degradation when coach service is unavailable."
 
-# Fix #3: SHOULD FIX (path exposure)
-git add src/trainingos/coach_web.py
-git commit -m "fix: Mask database path in /api/health response
-
-Omits full filesystem path from health check response to avoid
-leaking home directory and username information."
-
-# Fix #4: SHOULD FIX (date validation)
+# Fix #3: SHOULD FIX (date validation)
 git add src/trainingos/coach_web.py
 git commit -m "fix: Validate date format in /api/notes since parameter
 

@@ -2,33 +2,21 @@
 
 ## Garmin Self-Evaluation & Intensity
 
-**Garmin feature:** [Self-Evaluation](https://support.garmin.com/en-US/?faq=8nISJXqSZVAI3Td4IWRqsA) prompts after activities to capture two separate user inputs, stored in FIT files:
+**Garmin feature:** prompts after activities to capture two separate user inputs, stored in FIT files:
 - **Perceived Effort** (0-10 scale): Physiological difficulty — "how hard did I push?"
-- **Perceived Mood** (5-point scale: Very Weak → Weak → OK → Strong → Very Strong): Recovery/subjective state — "how strong did I feel?"
+- **Perceived Mood** (5-point scale: Very Weak → Weak → OK → Strong → Very Strong): 
 
 Both are stored in FIT session records; extraction code exists (fitdecode) but fields not yet captured in Activity model.
 
 **Garmin data state:**
-- 8 activity .fit exports in `var/garmin_activities/` (2025-02-04 to 2026-06-16)
-- 234 activities normalized into SQLite but missing perceived_effort and perceived_mood columns
-- Current schema: activities(record_id, activity_type, started_at, duration_seconds, distance_metres, title)
 - Metrics stored per-sample: altitude, cadence, distance, heart_rate, power, speed, temperature
 - HR zones: not yet computed from samples; will derive at sync time (5 zones from % of max HR)
 
 **Intensity scoring (proposed formula):**
 Uses weighted average of pace, HR zone, Garmin effort, weather, perceived mood to produce 0-10 intensity score. Formula components:
-- Pace (25%): fast efforts score high, recovery runs low
-- HR zone (25%): Z5 high, Z1-Z2 low
-- Perceived effort (30%): direct user input (0-10 normalized)
-- Weather (10%): temperature/humidity (hot/humid increases effort perception)
-- Perceived mood (10%): inverse of mood scale (Very Strong = low intensity felt, Very Weak = high intensity felt)
+- Pace (25%), HR zone (25%), Perceived effort (30%), Weather (10%), Perceived mood (10%): 
 
 Stored as `intensity_score REAL CHECK (intensity_score BETWEEN 0.0 AND 10.0)` on activities table.
-
-## Pending: Lock Down Personal Data
-Once dashboard is deployed, add `var/garmin_activities/` and `var/76e88aeb-*/` to `.claudeignore` to prevent raw GDPR export files from entering context.
-
-## Product
 
 TrainingOS: local-first running intelligence platform. 
 
@@ -64,8 +52,8 @@ optional adapters. Manual exports/imports must remain viable fallbacks.
 - Keep ingestion, normalization, analytics, retrieval, provider adapters, and
   presentation separated.
 - Define stable internal domain models before shaping code around vendor APIs.
-- Isolate LLM and embedding providers behind interfaces configurable for
-  OpenAI, Anthropic, Gemini, Ollama, or local alternatives.
+- Use Claude API for all LLM and embedding operations. Query Claude directly
+  with retrieved local evidence; never send raw source history wholesale.
 - Store the evidence behind every summary and projection; always expose inputs,
   formula version, and caveats — never an opaque score.
 - Use explicit units and timezone-aware timestamps. Avoid silent conversions.
@@ -116,7 +104,7 @@ included, omitted, and how that affects confidence. Examples:
 3. Activity and daily-health normalization plus weather enrichment.
 4. Tested, versioned derived metrics and weekly summaries.
 5. Dashboard backed only by local data.
-6. Provider-agnostic retrieval and AI coach.
+6. Claude-powered retrieval and AI coach with per-query model selection.
 
 ## Engineering Expectations
 
