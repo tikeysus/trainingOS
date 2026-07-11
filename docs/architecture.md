@@ -60,7 +60,7 @@ dry-run, and local scheduling behavior.
 ## Coach boundary
 
 The coach retrieves compact local evidence documents from SQLite before calling
-a provider. All coach queries use Claude via the Anthropic API. Online research
-and future provider integrations are not part of the default coach path; online
-evidence must be added later as an explicit source-ingestion boundary before it
+Claude via the Anthropic API. All coach queries use Claude for synthesis. Online
+research and external data sources are not part of the current design; additional
+evidence sources must be added as explicit data-ingestion boundaries before they
 can be cited by coach answers.

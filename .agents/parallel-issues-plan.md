@@ -33,8 +33,8 @@
    - Est. effort: 2-3 hours
 
 6. **#49: [Retrieval] Embedding-based search with FTS hybrid re-rank**
-   - EmbeddingProvider implementation + hybrid retrieval
-   - Can use mocked embeddings if Ollama unavailable
+   - EmbeddingProvider implementation + hybrid retrieval via Anthropic API
+   - FTS fallback for offline mode
    - Est. effort: 4-5 hours
 
 ### Phase 2: Model & Analytics (After Phase 1)

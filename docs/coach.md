@@ -1,9 +1,9 @@
 # Local coach
 
 TrainingOS coach answers are local-first. The coach retrieves compact evidence
-documents from SQLite, then asks a configured local chat provider to synthesize
+documents from SQLite, then asks Claude via the Anthropic API to synthesize
 that evidence. It must not call Garmin, Strava, weather services, web search, or
-cloud LLM providers for stored facts.
+external data sources for stored facts.
 
 ## Evidence behavior
 

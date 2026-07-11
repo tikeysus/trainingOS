@@ -209,7 +209,7 @@ def test_dashboard_health_with_context_notes():
 
 ### Implementation Checklist
 - [ ] Create `src/trainingos/providers/embedding.py` with `EmbeddingProvider` protocol
-- [ ] Implement `OllamaEmbeddingProvider` (or similar)
+- [ ] Implement `AnthropicEmbeddingProvider` (via Anthropic API)
 - [ ] Create `retrieval_embeddings` migration table (document_id, model_name, model_version, vector_blob)
 - [ ] Add hybrid retrieval logic: FTS candidate → embed query → cosine score → re-rank
 - [ ] Integrate into `CoachService` (fallback to FTS-only if unavailable)
@@ -241,10 +241,10 @@ def test_retrieval_fallback_to_fts():
 ```
 
 ### Notes
-- Independent feature (can use mocked embeddings)
-- Ollama's `nomic-embed-text` is 768-dimensional
+- Independent feature (can use mocked embeddings for tests)
+- Anthropic's embedding model: `text-embedding-3-small` (1536-dimensional)
 - FTS-only fallback critical for offline mode
-- Environment variables: `TRAININGOS_AI_EMBEDDING_PROVIDER`, `TRAININGOS_OLLAMA_EMBEDDING_MODEL`
+- Environment variables: `TRAININGOS_ANTHROPIC_API_KEY` (reuse existing), embedding model configurable
 
 ---
 

@@ -15,7 +15,7 @@ TrainingOS is a local-first running intelligence platform: Garmin sync → SQLit
 
 **Implementation Boundaries:**
 - Keep ingestion, normalization, analytics, retrieval, provider adapters, and presentation separated.
-- Use Claude API for all things LLM. 
+- Use Claude API exclusively via Anthropic for all LLM tasks; no alternative providers. 
 - Store evidence behind every summary and projection. 
 - Use explicit units and timezone-aware timestamps; avoid silent conversions.
 - Protect credentials and personal health data; never commit secrets.

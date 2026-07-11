@@ -1,6 +1,6 @@
 ---
 name: add-ai-provider
-description: Add or change an AI chat or embedding provider adapter in TrainingOS. Use for OpenAI, Anthropic, Gemini, Ollama, or local-provider integrations, shared interfaces, configuration, model metadata, timeouts, error mapping, or provider conformance tests. Do not use AI providers as sources of numeric training facts.
+description: (Deprecated) TrainingOS now uses Claude via Anthropic API exclusively. This skill documents the provider abstraction for reference only. Do not use for adding new providers. Use for maintaining Anthropic provider implementation, shared interfaces, configuration, model metadata, timeouts, error mapping, or provider conformance tests. Do not use AI providers as sources of numeric training facts.
 ---
 
 # Add AI Provider
