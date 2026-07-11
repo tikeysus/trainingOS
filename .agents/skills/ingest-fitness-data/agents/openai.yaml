@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest Fitness Data"
+  short_description: "Build local fitness data ingestion adapters"
+  default_prompt: "Use $ingest-fitness-data to add this fitness data source with raw retention and provenance."

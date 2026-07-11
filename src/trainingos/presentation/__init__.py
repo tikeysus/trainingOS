@@ -1,4 +1,4 @@
-"""Dashboard and coaching application services."""
+"""Coaching application services."""
 
 from __future__ import annotations
 

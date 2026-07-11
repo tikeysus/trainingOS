@@ -1,15 +1,1 @@
-services:
-  grafana:
-    image: grafana/grafana-oss:11.5.2
-    ports:
-      - "${TRAININGOS_GRAFANA_PORT:-3000}:3000"
-    environment:
-      GF_INSTALL_PLUGINS: frser-sqlite-datasource
-      GF_SECURITY_ADMIN_USER: "${TRAININGOS_GRAFANA_ADMIN_USER:-admin}"
-      GF_SECURITY_ADMIN_PASSWORD: "${TRAININGOS_GRAFANA_ADMIN_PASSWORD:-admin}"
-      GF_USERS_DEFAULT_THEME: light
-      GF_PANELS_DISABLE_SANITIZE_HTML: "true"
-    volumes:
-      - ${TRAININGOS_GRAFANA_PROVISIONING_DIR:-./grafana/provisioning}:/etc/grafana/provisioning:ro
-      - ${TRAININGOS_GRAFANA_DASHBOARDS_DIR:-./grafana/dashboards}:/var/lib/grafana/dashboards:ro
-      - ${TRAININGOS_GRAFANA_DB_PATH:-${TRAININGOS_DB_PATH:-./var/trainingos.sqlite3}}:/var/lib/trainingos/trainingos.sqlite3:ro
+services: {}

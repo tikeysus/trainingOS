@@ -1,0 +1,4 @@
+interface:
+  display_name: "Import Training Plan"
+  short_description: "Import and validate structured training plans"
+  default_prompt: "Use $import-training-plan to import this training plan with a preview and validation."

@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from trainingos.coach_web import create_server
-from trainingos.providers import AnthropicHealth, FakeChatProvider, OllamaHealth
+from trainingos.providers import AnthropicHealth, FakeChatProvider
 from trainingos.storage import apply_migrations, connect_database
 
 
@@ -26,11 +26,10 @@ class CoachWebTests(unittest.TestCase):
             port=0,
             database_path=self.database_path,
             provider=self.provider,
-            provider_health=lambda: OllamaHealth(
-                base_url="http://localhost:11434",
-                chat_model="llama3.2",
+            provider_health=lambda: AnthropicHealth(
+                chat_model="claude-opus-4-1",
                 available=False,
-                error="local Ollama service is not reachable; start it with `ollama serve`",
+                error="Anthropic API is not reachable",
             ),
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -82,8 +81,8 @@ class CoachWebTests(unittest.TestCase):
         self.assertEqual("degraded", payload["status"])
         self.assertEqual(1, payload["database"]["retrieval_documents"])
         self.assertFalse(payload["provider"]["available"])
-        self.assertEqual("ollama", payload["provider"]["provider"])
-        self.assertIn("ollama serve", payload["provider"]["error"])
+        self.assertEqual("claude", payload["provider"]["provider"])
+        self.assertIn("Anthropic API is not reachable", payload["provider"]["error"])
 
     def test_api_validates_question_and_evidence_limit(self) -> None:
         blank = self._post_json_error("/api/coach", {"question": " "})
@@ -142,7 +141,7 @@ class CoachWebTests(unittest.TestCase):
             server.server_close()
 
         self.assertEqual("ok", payload["status"])
-        self.assertEqual("anthropic", payload["provider"]["provider"])
+        self.assertEqual("claude", payload["provider"]["provider"])
         self.assertTrue(payload["provider"]["available"])
         self.assertEqual("claude-sonnet-4-6", payload["provider"]["chat_model"])
         self.assertNotIn("base_url", payload["provider"])
@@ -519,7 +518,7 @@ class CoachWebConfigIntegrationTests(unittest.TestCase):
         catching the bug where config.coach_token is read but not passed to
         create_server().
         """
-        from trainingos.config import AppConfig, COACH_TOKEN_ENV
+        from trainingos.config import ANTHROPIC_API_KEY_ENV, AppConfig, COACH_TOKEN_ENV
 
         tmp_dir = tempfile.TemporaryDirectory()
         try:
@@ -529,7 +528,9 @@ class CoachWebConfigIntegrationTests(unittest.TestCase):
 
             # Simulate what main() should do: create config with token and pass it to server
             token = "test-integration-token-12345"
-            config = AppConfig.from_env({COACH_TOKEN_ENV: token})
+            config = AppConfig.from_env(
+                {ANTHROPIC_API_KEY_ENV: "sk-ant-test", COACH_TOKEN_ENV: token}
+            )
 
             server = create_server(
                 host="127.0.0.1",
@@ -565,7 +566,7 @@ class CoachWebConfigIntegrationTests(unittest.TestCase):
 
     def test_config_token_none_allows_unauthenticated_access(self) -> None:
         """Verify that when config.coach_token is None, server allows unauthenticated requests."""
-        from trainingos.config import AppConfig
+        from trainingos.config import ANTHROPIC_API_KEY_ENV, AppConfig
 
         tmp_dir = tempfile.TemporaryDirectory()
         try:
@@ -573,7 +574,7 @@ class CoachWebConfigIntegrationTests(unittest.TestCase):
             with connect_database(db_path) as connection:
                 apply_migrations(connection)
 
-            config = AppConfig.from_env({})  # No token set
+            config = AppConfig.from_env({ANTHROPIC_API_KEY_ENV: "sk-ant-test"})  # No token set
 
             server = create_server(
                 host="127.0.0.1",

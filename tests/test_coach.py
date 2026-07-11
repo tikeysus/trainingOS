@@ -255,7 +255,7 @@ class CoachServiceTests(unittest.TestCase):
         self.assertIn("local provider failure: timeout", answer.caveats)
         self.assertIsNone(answer.provider_metadata)
 
-    def test_provider_unavailable_tells_user_to_start_ollama(self) -> None:
+    def test_provider_unavailable_tells_user_claude_is_unreachable(self) -> None:
         self._insert_document(
             document_id="doc-workout-1",
             document_type="workout",
@@ -268,8 +268,8 @@ class CoachServiceTests(unittest.TestCase):
         answer = service.answer("Summarize my recent running.")
 
         self.assertIn("found local TrainingOS evidence", answer.answer)
-        self.assertIn("Ollama is not reachable", answer.answer)
-        self.assertIn("ollama serve", answer.answer)
+        self.assertIn("Claude API is not reachable", answer.answer)
+        self.assertIn("Check your internet connection", answer.answer)
         self.assertIn("local provider failure: provider_unavailable", answer.caveats)
         self.assertIsNone(answer.provider_metadata)
 
@@ -332,7 +332,7 @@ class CoachServiceTests(unittest.TestCase):
         self.assertLessEqual(len(answer.evidence), 2)
         self.assertLessEqual(len(provider.requests[0].messages[1].content) // 4, 250 + 200)
 
-    def test_ollama_provider_does_not_inject_cloud_caveat(self) -> None:
+    def test_fake_provider_does_not_inject_cloud_caveat(self) -> None:
         self._insert_document(
             document_id="doc-week-1",
             document_type="week",
@@ -477,8 +477,8 @@ class TimeoutChatProvider(ChatProvider):
     def complete(self, request: ChatRequest) -> ChatResponse:
         raise ProviderError(
             ProviderErrorCategory.TIMEOUT,
-            "local Ollama request timed out",
-            provider="ollama",
+            "Claude API request timed out",
+            provider="anthropic",
             retryable=True,
         )
 
@@ -487,8 +487,8 @@ class UnavailableChatProvider(ChatProvider):
     def complete(self, request: ChatRequest) -> ChatResponse:
         raise ProviderError(
             ProviderErrorCategory.PROVIDER_UNAVAILABLE,
-            "local Ollama service is unavailable",
-            provider="ollama",
+            "Claude API is unavailable",
+            provider="anthropic",
             retryable=True,
         )
 

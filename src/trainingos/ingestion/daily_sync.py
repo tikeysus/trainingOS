@@ -1,10 +1,9 @@
-"""Nightly Garmin sync: migrations → sync → refresh → Grafana snapshot copy."""
+"""Nightly Garmin sync: migrations → sync → refresh."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,8 +25,6 @@ from trainingos.ingestion.sync import (
 )
 from trainingos.refresh import refresh_training_data
 from trainingos.storage import apply_migrations, connect_database
-
-GRAFANA_RUNTIME_PATH = Path("/private/tmp/trainingos-grafana-runtime/trainingos.sqlite3")
 
 
 def _garmin_handler(
@@ -117,12 +114,6 @@ def main() -> int:
             refresh_training_data(conn, timezone=config.local_timezone)
         except Exception:
             return 1
-
-        if GRAFANA_RUNTIME_PATH.parent.exists():
-            try:
-                shutil.copy2(config.database_path, GRAFANA_RUNTIME_PATH)
-            except OSError:
-                pass
 
         return 0
     except Exception:

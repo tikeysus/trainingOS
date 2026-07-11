@@ -47,8 +47,8 @@ optional adapters. Manual exports/imports must remain viable fallbacks.
 - Keep ingestion, normalization, analytics, retrieval, provider adapters, and
   presentation separated.
 - Define stable internal domain models before shaping code around vendor APIs.
-- Isolate LLM and embedding providers behind interfaces configurable for
-  OpenAI, Anthropic, Gemini, Ollama, or local alternatives.
+- Use Claude API for all LLM and embedding work. Provider abstraction enables
+  testing with deterministic fakes; production uses Anthropic.
 - Store the evidence used for summaries and projections. Never present an
   opaque score without its inputs, formula/version, and applicable caveats.
 - Use explicit units and timezone-aware timestamps. Avoid silent conversions.

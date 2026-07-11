@@ -11,7 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from trainingos.coach_web import create_server
-from trainingos.providers import FakeChatProvider, OllamaHealth
+from trainingos.providers import AnthropicHealth, FakeChatProvider
 from trainingos.storage import apply_migrations, connect_database
 
 
@@ -54,9 +54,8 @@ class NotesWebUiTests(unittest.TestCase):
             port=0,
             database_path=self.database_path,
             provider=FakeChatProvider("Test answer."),
-            provider_health=lambda: OllamaHealth(
-                base_url="http://localhost:11434",
-                chat_model="llama3.2",
+            provider_health=lambda: AnthropicHealth(
+                chat_model="claude-opus-4-1",
                 available=False,
                 error="not available in tests",
             ),

@@ -15,8 +15,8 @@ TrainingOS is a local-first running intelligence platform: Garmin sync → SQLit
 
 **Implementation Boundaries:**
 - Keep ingestion, normalization, analytics, retrieval, provider adapters, and presentation separated.
-- Use Claude API for all LLM and embedding operations; never use multiple providers.
-- Store evidence behind every summary and projection; always expose inputs, formula version, caveats.
+- Use Claude API for all things LLM. 
+- Store evidence behind every summary and projection. 
 - Use explicit units and timezone-aware timestamps; avoid silent conversions.
 - Protect credentials and personal health data; never commit secrets.
 - Prefer deterministic code for calculations; use LLMs for explanation and synthesis only.
@@ -68,12 +68,11 @@ Garmin is the preferred rich-data source. Manual FIT/JSON export-import remains 
 - FTS5 full-text search (BM25 ranking, line 119); stale documents excluded; stale reasons tracked for audit.
 - Token budgeting (line 168): coach service can truncate documents to stay under ~20k token budget (~4 chars per token estimate). Omitted docs tracked for transparency.
 
-## Coaching Behavior
-
-- Ground all answers in local evidence: activities, recovery data, weather, context notes, races, training blocks.
-- Distinguish observed facts, computed estimates, and model interpretation.
-- Include relevant dates, trends, uncertainty, data gaps, and caveats.
-- Avoid false precision; treat injury and health guidance as informational, not medical.
+### Presentation & Visualization
+- Coach UI (`coach_web.py`) is the single unified dashboard interface; no external dashboarding tools (Grafana removed).
+- Visualizations are markdown-native and generated on-demand: time-series charts, trend sparklines, pace distributions as interactive HTML (via `plotly`/`altair`/`vega-lite`).
+- Coach retrieval layer generates chart specs alongside evidence summaries; coach UI renders them inline in markdown.
+- Chart generation is deterministic (no external calls); charts are ephemeral (not persisted, regenerated on query).
 
 ## Implementation Status
 
@@ -100,24 +99,6 @@ Garmin is the preferred rich-data source. Manual FIT/JSON export-import remains 
 - Fixture scoping: function-level isolation; builder patterns for domain objects (e.g., `sample_activity()`, `sample_daily_health()`).
 - Current test coverage: 30 active test files, ~538 test methods (sync idempotency, FIT/JSON parsing, analytics formulas, coach service, migrations well-covered).
 - Test gaps: direct unit tests for `notes.py` internals and `presentation/__init__.py` helpers (question classification, prompt generation, caveat formatting); see `tests/pytest_pending/` for draft bug reproduction tests.
-
-**Code Organization:**
-- `domain/`: Immutable frozen dataclasses with strict `__post_init__` validation. `Unit` enum covers m, km, s, ms, m/s, s/km, bpm, degC, %, ratio, count, W, mL/kg/min.
-- `ingestion/`: Garmin adapter, FIT parser (extracts Perceived Effort/Mood), weather enrichment, raw artifact deduplication, daily_sync orchestrator.
-- `normalization/store.py`: Unit conversion, provenance replacement rules, idempotent upserts.
-- `analytics/`: Weekly metrics + block-level totals; versioned formulas tied to `MethodVersion`.
-- `retrieval/`: Compact evidence doc generation, FTS5 search, stale marking, token budgeting.
-- `presentation/`: `CoachService` (evidence-grounded Q&A, token budgeting, system prompt enforcement).
-- `coach_web.py`: HTTP API (`/api/coach`, `/api/notes`, `/api/health`, `/api/evidence`); optional bearer token auth.
-- `providers/`: Anthropic chat adapter; error classification & health checks; Protocols for extensibility.
-
-**Dependencies:**
-- Always ask before adding a new dependency; justify why it's needed over available alternatives.
-
-**Commit Conventions:**
-- Use conventional commits (feat:, fix:, chore:, test:, etc.).
-- Commit logical chunks as you go — not one giant commit at the end.
-- Never use --no-verify or skip hooks.
 
 **Database:**
 - 12 ordered migrations in `storage/sql/NNN_*.sql`; applied transactionally via `apply_migrations()`.

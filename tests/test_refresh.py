@@ -36,12 +36,8 @@ class RefreshTests(unittest.TestCase):
         self.connection.close()
         self.temporary_directory.cleanup()
 
-    def test_refresh_generates_dashboard_and_coach_data(self) -> None:
+    def test_refresh_generates_metrics_and_coach_data(self) -> None:
         self._activity("run-1", datetime(2026, 6, 16, 11, 0, tzinfo=UTC), 3600, 10000)
-
-        self.assertEqual(0, self._count("dashboard_weekly_training"))
-        self.assertEqual(0, self._count("dashboard_metric_timeseries"))
-        self.assertEqual(0, self._count("dashboard_evidence_documents"))
 
         report = refresh_training_data(
             self.connection,
@@ -52,9 +48,6 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(1, report.metrics.week_count)
         self.assertGreater(report.metrics.metric_count, 0)
         self.assertGreater(report.retrieval.generated_count, 0)
-        self.assertGreater(self._count("dashboard_weekly_training"), 0)
-        self.assertGreater(self._count("dashboard_metric_timeseries"), 0)
-        self.assertGreater(self._count("dashboard_evidence_documents"), 0)
 
     def test_main_wires_config_migrations_refresh_and_summary(self) -> None:
         connection = unittest.mock.Mock()
@@ -149,15 +142,6 @@ class RefreshTests(unittest.TestCase):
         )
         self.connection.commit()
 
-    def _count(self, table: str) -> int:
-        allowed_tables = {
-            "dashboard_weekly_training",
-            "dashboard_metric_timeseries",
-            "dashboard_evidence_documents",
-        }
-        if table not in allowed_tables:
-            raise ValueError("unsupported table")
-        return self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
 def _pythonpath_env() -> dict[str, str]:

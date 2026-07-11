@@ -397,3 +397,9 @@ def _require_text(value: str, name: str) -> str:
     if not value or not value.strip():
         raise ValueError(f"{name} must not be blank")
     return value.strip()
+
+
+def _timeout(value: float) -> float:
+    if value <= 0:
+        raise ValueError("timeout_seconds must be positive")
+    return float(value)

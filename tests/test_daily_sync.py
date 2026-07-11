@@ -27,7 +27,7 @@ from trainingos.ingestion.garmin import (
     GARMIN_PASSWORD_ENV,
     GarminConnectClient,
 )
-from trainingos.ingestion.daily_sync import GRAFANA_RUNTIME_PATH, main as daily_sync_main
+from trainingos.ingestion.daily_sync import main as daily_sync_main
 from trainingos.storage import apply_migrations, connect_database
 
 # ---------------------------------------------------------------------------
@@ -490,14 +490,12 @@ class GarminAdapterSyncTests(unittest.TestCase):
 
 
 class DailySyncOrchestrationTests(unittest.TestCase):
-    """daily_sync.main() wires migrations → sync → refresh → Grafana copy."""
+    """daily_sync.main() wires migrations → sync → refresh."""
 
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
         self._root = Path(self._tmpdir.name)
         self._database_path = self._root / "training.sqlite3"
-        self._grafana_dir = self._root / "grafana-runtime"
-        self._grafana_target = self._grafana_dir / "trainingos.sqlite3"
 
         conn = connect_database(self._database_path)
         apply_migrations(conn)
@@ -524,11 +522,7 @@ class DailySyncOrchestrationTests(unittest.TestCase):
         self,
         *,
         runner_return: SyncReport | None = None,
-        grafana_dir_exists: bool = False,
     ) -> tuple[int, MagicMock, MagicMock]:
-        if grafana_dir_exists:
-            self._grafana_dir.mkdir(exist_ok=True)
-
         report = runner_return or _stub_report()
         mock_runner_cls = MagicMock()
         mock_runner_cls.return_value.run.return_value = report
@@ -539,7 +533,6 @@ class DailySyncOrchestrationTests(unittest.TestCase):
             patch("trainingos.ingestion.daily_sync.GarminConnectClient", self._fake_client_cls()),
             patch("trainingos.ingestion.daily_sync.SyncRunner", mock_runner_cls),
             patch("trainingos.ingestion.daily_sync.refresh_training_data", mock_refresh),
-            patch("trainingos.ingestion.daily_sync.GRAFANA_RUNTIME_PATH", self._grafana_target),
         ):
             exit_code = daily_sync_main()
 
@@ -548,7 +541,7 @@ class DailySyncOrchestrationTests(unittest.TestCase):
     # A. Happy Path
 
     def test_full_pipeline_exits_zero_on_success(self) -> None:
-        exit_code, _, _ = self._run(grafana_dir_exists=True)
+        exit_code, _, _ = self._run()
         self.assertEqual(0, exit_code)
 
     def test_refresh_called_after_sync(self) -> None:
@@ -565,20 +558,10 @@ class DailySyncOrchestrationTests(unittest.TestCase):
             patch("trainingos.ingestion.daily_sync.GarminConnectClient", self._fake_client_cls()),
             patch("trainingos.ingestion.daily_sync.SyncRunner", mock_runner_cls),
             patch("trainingos.ingestion.daily_sync.refresh_training_data", mock_refresh),
-            patch("trainingos.ingestion.daily_sync.GRAFANA_RUNTIME_PATH", self._grafana_target),
         ):
             daily_sync_main()
 
         self.assertEqual(["sync", "refresh"], call_order)
-
-    def test_grafana_copy_written_to_runtime_path_when_dir_exists(self) -> None:
-        self._run(grafana_dir_exists=True)
-        self.assertTrue(self._grafana_target.exists())
-
-    def test_grafana_copy_is_valid_sqlite_file(self) -> None:
-        self._run(grafana_dir_exists=True)
-        conn = connect_database(self._grafana_target)
-        conn.close()
 
     def test_sync_run_row_recorded_as_completed(self) -> None:
         self._run()
@@ -597,12 +580,7 @@ class DailySyncOrchestrationTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         refresh.assert_called_once()
 
-    # C. Equivalence Partitioning — Grafana dir absent vs present
-
-    def test_grafana_dir_absent_skips_copy_silently(self) -> None:
-        exit_code, _, _ = self._run(grafana_dir_exists=False)
-        self.assertEqual(0, exit_code)
-        self.assertFalse(self._grafana_target.exists())
+    # C. Equivalence Partitioning
 
     def test_sync_failure_exits_one(self) -> None:
         failed = _stub_report(status=SyncStatus.FAILED)
@@ -621,35 +599,12 @@ class DailySyncOrchestrationTests(unittest.TestCase):
                 "trainingos.ingestion.daily_sync.refresh_training_data",
                 side_effect=RuntimeError("refresh exploded"),
             ),
-            patch("trainingos.ingestion.daily_sync.GRAFANA_RUNTIME_PATH", self._grafana_target),
         ):
             exit_code = daily_sync_main()
 
         self.assertEqual(1, exit_code)
 
-    # D. Edge Cases — best-effort Grafana copy
-
-    def test_grafana_copy_failure_does_not_fail_sync(self) -> None:
-        mock_runner_cls = MagicMock()
-        mock_runner_cls.return_value.run.return_value = _stub_report()
-        self._grafana_dir.mkdir()
-
-        with (
-            patch.dict("os.environ", self._env, clear=False),
-            patch("trainingos.ingestion.daily_sync.GarminConnectClient", self._fake_client_cls()),
-            patch("trainingos.ingestion.daily_sync.SyncRunner", mock_runner_cls),
-            patch("trainingos.ingestion.daily_sync.refresh_training_data"),
-            patch("trainingos.ingestion.daily_sync.GRAFANA_RUNTIME_PATH", self._grafana_target),
-            patch(
-                "trainingos.ingestion.daily_sync.shutil.copy2",
-                side_effect=OSError("permission denied"),
-            ),
-        ):
-            exit_code = daily_sync_main()
-
-        self.assertEqual(0, exit_code)
-
-    # E. Credential safety — no email/password in sync_errors table
+    # D. Credential safety — no email/password in sync_errors table
 
     def test_credentials_absent_from_sync_errors_table(self) -> None:
         garmin_instance = MagicMock()
@@ -661,7 +616,6 @@ class DailySyncOrchestrationTests(unittest.TestCase):
         with (
             patch.dict("os.environ", self._env, clear=False),
             patch("trainingos.ingestion.daily_sync.GarminConnectClient", fake_client_cls),
-            patch("trainingos.ingestion.daily_sync.GRAFANA_RUNTIME_PATH", self._grafana_target),
             patch("trainingos.ingestion.daily_sync.refresh_training_data"),
         ):
             daily_sync_main()
@@ -673,7 +627,7 @@ class DailySyncOrchestrationTests(unittest.TestCase):
         self.assertNotIn(_FAKE_EMAIL, all_messages)
         self.assertNotIn(_FAKE_PASSWORD, all_messages)
 
-    # F. State — migrations applied before sync
+    # E. State — migrations applied before sync
 
     def test_migrations_applied_before_sync_runner_is_created(self) -> None:
         """SyncRunner construction implies the schema is already present."""
@@ -699,7 +653,6 @@ class DailySyncOrchestrationTests(unittest.TestCase):
             patch("trainingos.ingestion.daily_sync.apply_migrations", tracking_migrations),
             patch("trainingos.ingestion.daily_sync.SyncRunner", tracking_runner),
             patch("trainingos.ingestion.daily_sync.refresh_training_data"),
-            patch("trainingos.ingestion.daily_sync.GRAFANA_RUNTIME_PATH", self._grafana_target),
         ):
             daily_sync_main()
 

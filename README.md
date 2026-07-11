@@ -9,7 +9,6 @@ boundaries, and local SQLite foundation. See
 [docs/architecture.md](docs/architecture.md),
 [docs/domain-conventions.md](docs/domain-conventions.md),
 [docs/analytics.md](docs/analytics.md),
-[docs/dashboard.md](docs/dashboard.md),
 [docs/coach.md](docs/coach.md), and
 [docs/storage.md](docs/storage.md).
 
@@ -53,12 +52,6 @@ Refresh derived metrics and coach retrieval documents after imports with:
 PYTHONPATH=src python3 -m trainingos.refresh
 ```
 
-Run the local Grafana dashboard with:
-
-```sh
-sh scripts/run-grafana.sh
-```
-
 Run the local coach chat UI with:
 
 ```sh
@@ -71,8 +64,7 @@ Check coach database/provider status with:
 curl http://localhost:8765/api/health
 ```
 
-The dashboard includes an `Ask Local Coach` link to the default UI at
-`http://localhost:8765`.
+Access the coach UI at `http://localhost:8765`.
 
 Import local FIT files, directories, or Garmin export zips with:
 
@@ -94,8 +86,7 @@ PYTHONPATH=src python3 -m trainingos.ingestion.daily_sync
 ```
 
 The pipeline runs migrations, syncs new activities from Garmin Connect,
-regenerates derived metrics and retrieval documents, and copies the database
-to the Grafana runtime path if available. Exit code 0 on success, 1 on failure.
+and regenerates derived metrics and retrieval documents. Exit code 0 on success, 1 on failure.
 
 ### Schedule with launchd (macOS)
 
