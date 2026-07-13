@@ -25,3 +25,6 @@ secrets/
 *.fit
 !tests/fixtures/sanitized/*.fit
 *.DS_Store
+
+# Local Garmin imports and other ephemeral data
+var/
