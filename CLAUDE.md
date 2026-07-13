@@ -2,6 +2,8 @@
 
 TrainingOS is a local-first running intelligence platform: Garmin sync → SQLite normalization → deterministic metric derivation → evidence-grounded AI coaching.
 
+**Vibe-Code Project:** Documentation and planning are entirely curtailed to the needs of the agent doing the work — no human onboarding or team-coordination content. Docs should be agent-actionable (concise reference material, test requirements, file pointers) and avoid scheduling, team assignment, or troubleshooting that assumes human collaboration.
+
 ## Core Principles
 
 **Non-Negotiable Architecture:**
@@ -109,4 +111,4 @@ Garmin is the preferred rich-data source. Manual FIT/JSON export-import remains 
 ## Known Issues
 
 - `tests/pytest_pending/` holds draft bug-reproduction tests (`test_bugs_before_and_after.py`, `test_critical_bugs.py`); intentionally deferred and not yet triaged. Leave as-is until explicitly picked up.
-- **Embedding provider naming error:** `.agents/parallel-issues-plan.md`, `.agents/worktree-guides.md`, and `.agents/WORKTREE_REBASE_GUIDE.md` currently direct issue #49 to implement `AnthropicEmbeddingProvider` targeting `text-embedding-3-small`. That model name is OpenAI's, not Anthropic's — Anthropic does not publish an embeddings API. Before implementing #49, pick a real embedding source (e.g. a local/open-weight model, or an actual third-party embeddings API) and correct those `.agents/` docs; do not build against `text-embedding-3-small` as specified.
+- **Embedding provider naming error:** `.agents/PLAN.md` currently references issue #49 embedding implementation. Before implementing #49, pick a real embedding source (Anthropic does not publish an embeddings API; `text-embedding-3-small` is OpenAI's). Update the implementation target in `.agents/PLAN.md` and `CLAUDE.md` before coding.

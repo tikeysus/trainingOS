@@ -1,4 +1,0 @@
-interface:
-  display_name: "Implement Training Metric"
-  short_description: "Implement deterministic versioned training metrics"
-  default_prompt: "Use $implement-training-metric to implement this metric with evidence, units, and tests."

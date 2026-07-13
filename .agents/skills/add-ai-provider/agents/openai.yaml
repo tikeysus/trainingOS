@@ -1,4 +1,0 @@
-interface:
-  display_name: "Add AI Provider"
-  short_description: "Add provider-neutral chat and embedding adapters"
-  default_prompt: "Use $add-ai-provider to add this provider behind the shared interfaces and conformance tests."
