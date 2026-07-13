@@ -47,8 +47,9 @@
 
 8. **#64: [Analytics] Implement intensity score computation module**
    - Depends on: #62 (Activity model has new fields)
-   - Formula: pace (25%) + HR zone (25%) + effort (30%) + weather (10%) + mood (10%)
+   - Formula: pace (25%) + HR zone (25%) + effort (30%) + weather (10%) + mood (10%) — **draft only**; `CLAUDE.md` § Known Issues currently states no formula is finalized, so validate this weighting before implementing
    - Est. effort: 2-3 hours
+   - See `.agents/skills/implement-training-metric/SKILL.md` for deterministic-metric conventions (versioning, evidence linkage)
 
 ### Phase 3: Integration (After Phase 2)
 **Depends on #64 being merged:**

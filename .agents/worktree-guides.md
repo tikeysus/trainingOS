@@ -80,6 +80,7 @@ def test_fit_parser_extracts_effort_and_mood():
 - Independent of #61 (develop in parallel)
 - Feeds into: #62, #64
 - FIT format reference: search "Garmin FIT profile" or use `fitparse` library
+- See `.agents/skills/ingest-fitness-data/SKILL.md` for ingestion/sync conventions
 
 ---
 
@@ -245,6 +246,7 @@ def test_retrieval_fallback_to_fts():
 - Anthropic's embedding model: `text-embedding-3-small` (1536-dimensional)
 - FTS-only fallback critical for offline mode
 - Environment variables: `TRAININGOS_ANTHROPIC_API_KEY` (reuse existing), embedding model configurable
+- Before starting: see `CLAUDE.md` § Known Issues — the embedding provider/model choice above needs correcting; Anthropic does not publish an embeddings API
 
 ---
 

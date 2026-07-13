@@ -109,5 +109,4 @@ Garmin is the preferred rich-data source. Manual FIT/JSON export-import remains 
 ## Known Issues
 
 - `tests/pytest_pending/` holds draft bug-reproduction tests (`test_bugs_before_and_after.py`, `test_critical_bugs.py`); intentionally deferred and not yet triaged. Leave as-is until explicitly picked up.
-- Garmin Perceived Effort/Mood: FIT parser extracts fields (lines 192-205 in `ingestion/fit.py`) but not yet normalized to Activity model.
-- Intensity score: proposed formula exists but implementation incomplete; no `intensity_score` field on activities table yet.
+- **Embedding provider naming error:** `.agents/parallel-issues-plan.md`, `.agents/worktree-guides.md`, and `.agents/WORKTREE_REBASE_GUIDE.md` currently direct issue #49 to implement `AnthropicEmbeddingProvider` targeting `text-embedding-3-small`. That model name is OpenAI's, not Anthropic's — Anthropic does not publish an embeddings API. Before implementing #49, pick a real embedding source (e.g. a local/open-weight model, or an actual third-party embeddings API) and correct those `.agents/` docs; do not build against `text-embedding-3-small` as specified.

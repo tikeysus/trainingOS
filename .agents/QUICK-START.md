@@ -195,6 +195,8 @@ git push -u origin <branch>
 - **Repo architecture:** See `docs/` or top-level `CLAUDE.md`
 - **Testing setup:** See `tests/conftest.py` and existing test patterns
 
+For FAQ-style troubleshooting ("I'm confused where to start", failing tests, etc.), see `README.md` § Troubleshooting.
+
 ## Success Criteria
 
 Phase 1 is complete when:
